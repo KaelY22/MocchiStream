@@ -1,1 +1,8 @@
 .directory
+.wrangler/
+.cache/
+node_modules/
+dist/
+*.log
+worker/worker.original.js
+worker/worker.sololatino.bak.js
