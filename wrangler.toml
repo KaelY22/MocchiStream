@@ -1,0 +1,9 @@
+name = "mocchistream"
+main = "worker/worker.js"
+compatibility_date = "2024-11-01"
+account_id = "b7ccd04fa7c5cd02effd43406b25e4a7"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mocchistream-db"
+database_id = "8b081a16-555c-4818-80d7-fbd767bec4c5"

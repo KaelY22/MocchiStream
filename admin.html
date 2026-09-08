@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0f0f1a" />
+  <title>MocchiStream · Gestión</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="admin-page">
+
+    <header class="site-header admin-header">
+      <img src="icons/profile.png" alt="MocchiStream" class="logo" onerror="this.style.display='none'" />
+      <span class="brand-tag">Gestión</span>
+      <button onclick="logout()" class="btn btn-ghost btn-small">Salir</button>
+    </header>
+
+    <div id="loginScreen" class="login-screen">
+      <div class="login-card">
+        <h2 class="login-title">Acceso privado</h2>
+        <input type="password" id="loginPassword" placeholder="Contraseña" class="input-glass w-full" autocomplete="new-password" />
+        <button onclick="adminLoginCheck()" class="btn btn-neon w-full">Ingresar</button>
+        <p id="loginErrorMsg" class="error-msg hidden">Contraseña incorrecta</p>
+      </div>
+    </div>
+
+    <div id="adminContent" class="admin-content hidden animate-fade-in-up">
+
+      <!-- ============ PANEL ============ -->
+      <section id="view-panel" class="admin-view app-view">
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            Estado general
+          </h3>
+          <div class="stats-grid" id="statsGrid"></div>
+        </div>
+
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h5v5H4zM15 4h5v5h-5zM4 15h5v5H4zM15 15h5v5h-5z"/></svg>
+            Caché del worker
+          </h3>
+          <p class="card-hint">La caché acelera la app pero guarda resultados viejos hasta 5 min (búsquedas) o 30 min (portada). Púrjala si editas algo y quieres verlo al instante.</p>
+          <div id="cacheBox">
+            <div class="cache-row"><span class="spinner"></span></div>
+          </div>
+        </div>
+
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Accesos rápidos
+          </h3>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="switchTab('catalog')">Editar metadatos</button>
+            <button class="btn btn-ghost" onclick="switchTab('categories')">Mis categorías</button>
+            <button class="btn btn-ghost" onclick="switchTab('registry')">Ver todo el registro</button>
+            <a class="btn btn-ghost" href="https://mocchi-stream.pages.dev" target="_blank" rel="noopener">Abrir la app</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ CATALOGO ============ -->
+      <section id="view-catalog" class="admin-view app-view hidden">
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            Gestionar metadatos
+          </h3>
+          <p class="card-hint">Busca una película o serie y edita su categoría, enlace de descarga o capítulos.</p>
+          <input type="text" id="adminSearch" placeholder="Buscar película o serie..." class="input-glass w-full" autocomplete="off" data-lpignore="true" />
+          <div class="search-chips" id="adminSourceChips">
+            <button class="chip active" data-src="">Todas</button>
+            <button class="chip" data-src="PelisplusHD">PelisplusHD</button>
+            <button class="chip" data-src="Cuevana">Cuevana</button>
+            <button class="chip" data-src="Cinecalidad">Cinecalidad</button>
+          </div>
+          <div id="searchResults" class="search-results"></div>
+        </div>
+
+        <section id="editForm" class="admin-glass-card edit-form hidden">
+          <div class="edit-header">
+            <h3 class="edit-title" id="editTitle">Editar metadatos</h3>
+            <button onclick="closeEditForm()" class="btn btn-ghost btn-close" aria-label="Cerrar">&times;</button>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Categoría personalizada</label>
+            <input type="text" id="editCategory" placeholder="Ej: Marvel, Kids, Terror..." class="input-glass w-full" autocomplete="off" />
+          </div>
+          <div class="form-group" id="editDownloadGroup">
+            <label class="form-label">Enlace de descarga (URL)</label>
+            <input type="text" id="editDownload" placeholder="https://mega.nz/... o https://...directa.mp4" class="input-glass w-full" autocomplete="off" />
+          </div>
+          <div class="btn-row">
+            <button onclick="saveMetadata()" class="btn btn-neon">Guardar metadatos</button>
+            <button onclick="deleteMetadata()" class="btn btn-danger">Eliminar metadatos</button>
+          </div>
+          <p class="form-note">Los campos vacíos se guardarán como <span class="note-highlight">null</span> (se usará el valor por defecto de la fuente).</p>
+        </section>
+
+        <section id="episodesSection" class="admin-glass-card edit-form hidden">
+          <div class="edit-header">
+            <h3 class="edit-title">
+              <svg class="t-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10"/></svg>
+              Enlaces de descarga por capítulo
+            </h3>
+            <button onclick="closeEditForm()" class="btn btn-ghost btn-close" aria-label="Cerrar">&times;</button>
+          </div>
+          <div id="episodesList"></div>
+        </section>
+      </section>
+
+      <!-- ============ CATEGORIAS ============ -->
+      <section id="view-categories" class="admin-view app-view hidden">
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10"/></svg>
+            Mis categorías
+          </h3>
+          <p class="card-hint">Colecciones personalizadas. Puedes renombrarlas, mover títulos entre ellas o quitarlos.</p>
+          <div id="categoriesList"></div>
+        </div>
+      </section>
+
+      <!-- ============ REGISTRO ============ -->
+      <section id="view-registry" class="admin-view app-view hidden">
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a2 2 0 011.4.6l4 4a2 2 0 01.6 1.4V19a2 2 0 01-2 2z"/></svg>
+            Registro completo
+          </h3>
+          <p class="card-hint">Todos los títulos con metadatos personalizados en la base de datos.</p>
+          <input type="text" id="registryFilter" placeholder="Filtrar por título o categoría..." class="input-glass w-full" autocomplete="off" data-lpignore="true" />
+          <div id="registryList" class="registry-list"></div>
+        </div>
+      </section>
+
+      <!-- ============ PERFIL ============ -->
+      <section id="view-profile" class="admin-view app-view hidden">
+        <div class="admin-glass-card">
+          <h3 class="card-title">
+            <svg class="t-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            Avatar
+          </h3>
+          <div class="avatar-row">
+            <img id="adminAvatarPreview" class="avatar-preview" src="" alt="Avatar" />
+            <div class="avatar-controls">
+              <input type="text" id="avatarUrlInput" placeholder="URL del avatar" class="input-glass w-full" autocomplete="off" />
+              <div class="btn-row">
+                <button onclick="saveAvatar()" class="btn btn-neon btn-small">Guardar avatar</button>
+                <button onclick="deleteAvatar()" class="btn btn-danger btn-small">Eliminar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <nav class="bottom-nav hidden" id="adminNav">
+      <button class="nav-item active" data-view="panel" aria-label="Panel">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
+        <span>Panel</span>
+      </button>
+      <button class="nav-item" data-view="catalog" aria-label="Catálogo">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></span>
+        <span>Catálogo</span>
+      </button>
+      <button class="nav-item" data-view="categories" aria-label="Categorías">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h7v7H4zM13 5h7v4h-7zM4 16h7v3H4zM13 12h7v7h-7z"/></svg></span>
+        <span>Categorías</span>
+      </button>
+      <button class="nav-item" data-view="registry" aria-label="Registro">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a2 2 0 011.4.6l4 4a2 2 0 01.6 1.4V19a2 2 0 01-2 2z"/></svg></span>
+        <span>Registro</span>
+      </button>
+      <button class="nav-item" data-view="profile" aria-label="Perfil">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></span>
+        <span>Perfil</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="js/admin.js"></script>
+</body>
+</html>
