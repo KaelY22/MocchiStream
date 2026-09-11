@@ -1,4 +1,4 @@
-import { API_BASE, esc, showToast } from './utils.js';
+import { API_BASE, esc, showToast, safeImg } from './utils.js';
 import { isFav, toggleFav, isInWatchLater, toggleWatchLater, setDetailFavUpdater } from './catalog.js';
 import { openSheet } from './player.js';
 
@@ -111,7 +111,7 @@ export function openDetail(item, season) {
 function renderEps(eps, item) {
   if (!eps.length) return '<p class="hint">Sin episodios en esta temporada.</p>';
   return eps.map(e => {
-    const thumb = (e.poster && String(e.poster).startsWith('http')) ? e.poster : (item.poster || '');
+    const thumb = (e.poster && String(e.poster).startsWith('http')) ? safeImg(e.poster) : (item.poster ? safeImg(item.poster) : '');
     const numLabel = `Cap ${e.episode}`;
     return `
       <div class="ep-item ${e.custom ? 'ep-custom' : ''}" data-url="${esc(e.link || '')}">

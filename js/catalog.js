@@ -1,4 +1,4 @@
-import { esc, PLACEHOLDER_SVG, showToast, loadLS, saveLS, API_BASE } from './utils.js';
+import { esc, PLACEHOLDER_SVG, showToast, loadLS, saveLS, API_BASE, safeImg } from './utils.js';
 
 let favs = [];
 let history = [];
@@ -28,13 +28,20 @@ export function loadLists() {
 async function backfillHistoryPosters() {
   const missing = history.filter(h => h && h.url && !h.poster).slice(0, 20);
   if (!missing.length) return;
-  await Promise.allSettled(missing.map(async h => {
-    try {
-      const r = await fetch(`${API_BASE}/details?url=${encodeURIComponent(h.url)}`);
-      const d = await r.json();
-      if (d && d.poster && !h.poster) h.poster = d.poster;
-    } catch (e) {}
-  }));
+  let idx = 0;
+  const workers = Array.from({ length: 4 }, async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= missing.length) return;
+      const h = missing[i];
+      try {
+        const r = await fetch(`${API_BASE}/details?url=${encodeURIComponent(h.url)}`);
+        const d = await r.json();
+        if (d && d.poster && !h.poster) h.poster = d.poster;
+      } catch (e) {}
+    }
+  });
+  await Promise.allSettled(workers);
   if (missing.some(h => h.poster)) {
     saveLS('ms_history', history);
     notifyListChanged();
@@ -156,7 +163,7 @@ export function getItemType(url) {
 
 export function cardHtml(item, opts = {}) {
   const title = item.title || 'Sin título';
-  const poster = item.poster && String(item.poster).startsWith('http') ? item.poster : PLACEHOLDER_SVG;
+  const poster = safeImg(item.poster);
   const fav = isFav(item.url);
   const typeLabel = getItemType(item.url) || (item.category && item.category !== 'Estrenos' ? item.category : '');
   const progress = (item.pos && item.dur && item.pos > 0 && item.pos < item.dur * 0.93)

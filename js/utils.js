@@ -15,6 +15,14 @@ export function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+export function safeImg(url) {
+  try {
+    const u = new URL(String(url || ''));
+    if (u.protocol === 'http:' || u.protocol === 'https:') return esc(url);
+  } catch (e) {}
+  return PLACEHOLDER_SVG;
+}
+
 export function showToast(msg, error = false) {
   const t = document.getElementById('toast');
   if (!t) return;

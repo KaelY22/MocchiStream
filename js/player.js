@@ -20,7 +20,7 @@ let currentSubTrack = -1;
 let currentSpeed = 1;
 
 const FAST_HOSTS = /(?:vimeos\.net|goodstream\.one|hlswish\.com|uqload\.[a-z]+)/i;
-const IFRAME_HOSTS = /(?:vidhidepro\.com|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com)/i;
+const IFRAME_HOSTS = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com)/i;
 
 export function initPlayer() {
   document.getElementById('sourceSheet').addEventListener('click', e => {
@@ -163,6 +163,13 @@ function proxyUrl(url, ref) {
   return u.href;
 }
 
+function fetchStream(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  return fetch(`${API_BASE}/stream?url=${encodeURIComponent(url)}`, { signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 function hideOverlay() {
   document.getElementById('playerOverlay').classList.add('hide-overlay');
 }
@@ -253,7 +260,7 @@ function tryNextFastSource(title, resumeAt, reason) {
     const next = sourceCandidates[candidateIdx];
     if (!FAST_HOSTS.test(next)) break;
     showToast(`Fuente agotada (${reason}). Probando la siguiente sin anuncios...`, false);
-    fetch(`${API_BASE}/stream?url=${encodeURIComponent(next)}`)
+    fetchStream(next)
       .then(res => res.json())
       .then(s => {
         if (s && s.ok) {
@@ -287,7 +294,7 @@ function playOwnPlayer(stream, title, resumeAt) {
       stream.retried = true;
       destroyOwnPlayer();
       showToast('Reintentando la fuente con un token nuevo...', false);
-      fetch(`${API_BASE}/stream?url=${encodeURIComponent(stream.sourceUrl)}`)
+      fetchStream(stream.sourceUrl)
         .then(res => res.json())
         .then(s => {
           if (s && s.ok) {
@@ -309,10 +316,10 @@ function playOwnPlayer(stream, title, resumeAt) {
       fetchSetup: (ctx, init) => new Request(proxyUrl(ctx.url, stream.referer), init),
       manifestLoadingTimeOut: 10000,
       levelLoadingTimeOut: 10000,
-      fragLoadingTimeOut: 10000,
+      fragLoadingTimeOut: 8000,
       manifestLoadingMaxRetry: 3,
       levelLoadingMaxRetry: 3,
-      fragLoadingMaxRetry: 3,
+      fragLoadingMaxRetry: 2,
       progressive: false,
       maxBufferLength: 10,
       maxBufferSize: 20 * 1000 * 1000,
@@ -469,7 +476,7 @@ export function openFullPlayerExternal(title, videoUrl) {
   showBuffering(false);
   const h = currentPlaying ? getHistory().find(e => e.url === currentPlaying.url) : null;
   const resumeAt = (h && h.pos && h.dur && h.pos > 10 && h.pos < h.dur * 0.93) ? h.pos : 0;
-  fetch(`${API_BASE}/stream?url=${encodeURIComponent(videoUrl)}`)
+  fetchStream(videoUrl)
     .then(res => res.json())
     .then(stream => {
       if (stream && stream.ok) {

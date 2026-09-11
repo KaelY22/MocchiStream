@@ -1,4 +1,4 @@
-import { API_BASE, PLACEHOLDER_SVG, showToast, esc } from './utils.js';
+import { API_BASE, PLACEHOLDER_SVG, showToast, esc, safeImg } from './utils.js';
 
 let adminPassword = '';
 let searchResults = [];
@@ -136,7 +136,7 @@ async function loadCategoriesView() {
         <div class="cat-items ${i === 0 ? 'open' : ''}">
           ${r.items.length ? r.items.map(item => `
             <div class="cat-item">
-              <img class="cat-item-poster" src="${item.poster && String(item.poster).startsWith('http') ? item.poster : PLACEHOLDER_SVG}" alt="" loading="lazy" />
+              <img class="cat-item-poster" src="${safeImg(item.poster)}" alt="" loading="lazy" />
               <span class="cat-item-title">${esc(item.title)}</span>
               <span class="src-badge sb-${esc((item.source || '').toLowerCase())}">${esc(item.source || '')}</span>
               <button class="cat-item-move" onclick="moveCatItem(this)" data-url="${encodeURIComponent(item.url)}" title="Mover a otra categoría">↗</button>
@@ -220,6 +220,10 @@ function logout() {
 async function apiFetch(url, options = {}) {
   const headers = { 'X-Admin-Password': adminPassword, ...options.headers };
   const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    logout();
+    throw new Error('Sesión expirada');
+  }
   if (!res.ok) throw new Error('API error');
   return res.json();
 }
@@ -249,7 +253,7 @@ function setupSearch() {
         searchResults = items;
         resultsDiv.innerHTML = items.length ? items.map(item => `
           <button class="search-result-item" data-url="${encodeURIComponent(item.url || '')}">
-            <img src="${item.poster && String(item.poster).startsWith('http') ? item.poster : PLACEHOLDER_SVG}" />
+            <img src="${safeImg(item.poster)}" />
             <span class="result-title">${esc(item.title)}</span>
             ${item.source ? `<span class="result-source">${esc(item.source)}</span>` : ''}
           </button>

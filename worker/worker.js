@@ -6,7 +6,7 @@ const CUEVANA_URL = 'https://wv3.cuevana3.eu';
 const PHD_URL = 'https://pelisplushd.bz';
 const PAGE_SIZE = 60;
 const CACHE_SEARCH_TTL = 300;
-const CACHE_MAIN_TTL = 60;
+const CACHE_MAIN_TTL = 300;
 const D1_CHUNK = 80;
 const CACHE_HOST = 'https://mocchi-cache.internal';
 
@@ -55,13 +55,13 @@ export default {
     if (path === '/api/links' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-      return handleLinks(targetUrl, corsHeaders);
+      return handleLinks(targetUrl, corsHeaders, env);
     }
 
     if (path === '/api/stream' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-      return handleStreamResolve(targetUrl, corsHeaders);
+      return handleStreamResolve(targetUrl, corsHeaders, env);
     }
 
     if (path === '/api/proxy' && method === 'GET') {
@@ -93,6 +93,10 @@ export default {
     if (path.startsWith('/api/admin')) {
       const password = request.headers.get('X-Admin-Password');
       if (password !== env.ADMIN_PASSWORD) {
+        const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (adminRateLimited(ip)) {
+          return jsonResponse({ error: 'Demasiados intentos. Espera 15 minutos.' }, corsHeaders, 429);
+        }
         return jsonResponse({ error: 'Unauthorized' }, corsHeaders, 401);
       }
 
@@ -146,6 +150,67 @@ function jsonResponse(data, corsHeaders, status = 200) {
   });
 }
 
+const PRIVATE_HOST_RE = /(?:^|\.)(?:local|internal|localhost|lan)$|^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d)\.|0\.)/i;
+
+const PROVIDER_ALLOWED_HOSTS = ['pelisplushd.bz', 'cuevana3.eu', 'cinecalidad.am'];
+
+const STREAM_ALLOWED_HOSTS = [
+  'vimeos.net', 'goodstream.one', 'hlswish.com', 'uqload.*', 'vidhidepro.com', 'morencius.com',
+  'streamwish.to', 'filemoon.sx', 'watchsb.com', 'lulustream.com', 'dood.la', 'doodstream.com',
+  'dooood.com', 'doods.pro', 'd0000d.com', 'd000d.com', 'ds2play.com', 'ds2video.com',
+  'myvidplay.com', 'playmogo.com', 'dood.video', 'byse.com', 'byse.sx', 'streamtape.com',
+  'streamtape.net', 'streamtape.xyz', 'watchadsontape.com', 'shavetape.cash', 'vide0.net',
+  'minochinos.com', 'acek-cdn.com', 'dramiyos-cdn.com', 'cloudatacdn.com', 'filelions.live',
+  'filelions.online', 'filelions.to', 'embed69.org', 'xupalace.org', 'hglink.to',
+  'premilkyway.com', 'pelisplushd.bz', 'cuevana3.eu', 'cinecalidad.am'
+];
+
+function hostAllowed(host, suffixes) {
+  return suffixes.some(s => {
+    if (s.includes('*')) {
+      const re = new RegExp('^(?:[a-z0-9-]+\\.)*' + s.replace(/\./g, '\\.').replace(/\*/g, '[a-z0-9-]+') + '$');
+      return re.test(host);
+    }
+    return host === s || host.endsWith('.' + s);
+  });
+}
+
+function assertSafeUrl(rawUrl, allowedSuffixes) {
+  let u;
+  try { u = new URL(rawUrl); } catch (e) { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  if (PRIVATE_HOST_RE.test(host)) return null;
+  if (allowedSuffixes && !hostAllowed(host, allowedSuffixes)) return null;
+  return u;
+}
+
+async function mapLimit(arr, limit, fn) {
+  const out = new Array(arr.length);
+  let idx = 0;
+  const workers = Array.from({ length: Math.min(limit, arr.length) }, async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= arr.length) return;
+      out[i] = await fn(arr[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+const adminAttempts = new Map();
+function adminRateLimited(ip) {
+  const now = Date.now();
+  let record = adminAttempts.get(ip);
+  if (!record || now > record.reset) {
+    record = { count: 0, reset: now + 15 * 60 * 1000 };
+    adminAttempts.set(ip, record);
+  }
+  record.count++;
+  return record.count > 10;
+}
+
 async function fetchHTML(url, timeout = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -189,6 +254,14 @@ async function invalidateMainPage(env) {
   }
 }
 
+async function invalidateDetails(url, env) {
+  const key = 'details/v1/' + encodeURIComponent(url);
+  await caches.default.delete(new Request(CACHE_HOST + '/' + key));
+  if (env && env.DB) {
+    await env.DB.prepare('DELETE FROM cache_keys WHERE key = ?').bind(key).run().catch(() => {});
+  }
+}
+
 function normTitle(t) {
   return String(t || '')
     .toLowerCase()
@@ -208,7 +281,7 @@ function combineItems(phdHtml, cueHtml, cineHtml, opts = {}) {
   const seen = new Set();
   const out = [];
   for (const it of [...phd, ...cue, ...cine]) {
-    if (filterAnime && String(it.url || '').includes('/anime/')) continue;
+    if (filterAnime && /\/animes?\//.test(String(it.url || ''))) continue;
     const k = normTitle(it.title);
     if (!k || seen.has(k)) continue;
     seen.add(k);
@@ -562,14 +635,18 @@ async function extractEmbed69(url) {
 
 async function getPelisplusHDLinks(targetUrl) {
   const html = await fetchHTML(targetUrl);
-  const links = [];
   const scriptMatch = html.match(/var video = \[\];([\s\S]*?)(?:<\/script>|$)/i);
   const script = scriptMatch ? scriptMatch[1] : '';
   const urlRegex = /(https?:\/\/[^\s"'\\]+)/g;
+  const embeds = [];
   let m;
   while ((m = urlRegex.exec(script)) !== null) {
     const u = m[1].replace(/[);,'"]+$/, '');
     if (!u.includes('http')) continue;
+    embeds.push(u);
+  }
+  const links = [];
+  await mapLimit(embeds, 4, async u => {
     if (u.includes('embed69.org')) {
       try {
         links.push(...await extractEmbed69(u));
@@ -588,7 +665,7 @@ async function getPelisplusHDLinks(targetUrl) {
         if (iframeMatch) links.push(fixHostsLinks(iframeMatch[1]));
       } catch (e) {}
     }
-  }
+  });
   if (links.length === 0) {
     const firstEp = html.match(/href="([^"]*\/temporada\/\d+\/capitulo\/\d+)"[^>]*>/i);
     if (firstEp && firstEp[1] !== targetUrl) {
@@ -666,20 +743,24 @@ async function extractCuevanaLinksFromHtml(html) {
   const links = [];
   const seen = new Set();
   const dataTrRegex = /data-tr="([^"]*)"/gi;
+  const iframes = [];
   let match;
   while ((match = dataTrRegex.exec(html)) !== null) {
     const iframeUrl = match[1];
     if (!iframeUrl || seen.has(iframeUrl)) continue;
     seen.add(iframeUrl);
+    iframes.push(iframeUrl);
+  }
+  await mapLimit(iframes, 4, async iframeUrl => {
     try {
       const iframeHtml = await fetchHTML(iframeUrl);
       const urlMatch = iframeHtml.match(/var url = '([^']*)';/i);
-      if (!urlMatch) continue;
+      if (!urlMatch) return;
       let videoUrl = fixHostsLinks(urlMatch[1]);
-      if (!videoUrl || CUEVANA_DEAD_HOSTS.test(videoUrl)) continue;
+      if (!videoUrl || CUEVANA_DEAD_HOSTS.test(videoUrl)) return;
       if (!links.includes(videoUrl)) links.push(videoUrl);
     } catch (e) {}
-  }
+  });
   return links;
 }
 
@@ -926,6 +1007,12 @@ async function handleSearch(query, page, env, corsHeaders, source) {
 
 async function handleDetails(targetUrl, corsHeaders, env) {
   try {
+    if (!assertSafeUrl(targetUrl, PROVIDER_ALLOWED_HOSTS)) {
+      return jsonResponse({ error: 'URL no permitida' }, corsHeaders, 403);
+    }
+    const cacheKey = 'details/v1/' + encodeURIComponent(targetUrl);
+    const hit = await cacheGet(cacheKey);
+    if (hit) return hit;
     let details;
     if (targetUrl.includes('cinecalidad')) {
       details = await getCinecalidadDetails(targetUrl);
@@ -964,7 +1051,7 @@ async function handleDetails(targetUrl, corsHeaders, env) {
         details.episodes = details.episodes.concat(customs).sort((a, b) => a.season - b.season || a.episode - b.episode);
       }
     }
-    return jsonResponse(details, corsHeaders);
+    return cachePut(cacheKey, details, 600, corsHeaders, env);
   } catch (err) {
     return jsonResponse({ error: err.message }, corsHeaders, 500);
   }
@@ -990,15 +1077,20 @@ async function handleUpsertEpisode(request, env, corsHeaders) {
     }
     const s = parseInt(season);
     const e = parseInt(episode);
+    if (!Number.isFinite(s) || !Number.isFinite(e) || s <= 0 || e <= 0) {
+      return jsonResponse({ error: 'Temporada y capítulo deben ser números positivos' }, corsHeaders, 400);
+    }
     const dl = (download_link || '').trim() || null;
     const custom = is_custom ? 1 : 0;
     if (!custom && !dl) {
       await env.DB.prepare('DELETE FROM episode_metadata WHERE series_url = ? AND season = ? AND episode = ?').bind(series_url, s, e).run();
+      await invalidateDetails(series_url, env);
       return jsonResponse({ ok: true, cleared: true }, corsHeaders);
     }
     await env.DB.prepare(
       'INSERT OR REPLACE INTO episode_metadata (series_url, season, episode, name, download_link, is_custom, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(series_url, s, e, (name || '').trim() || null, dl, custom, Date.now()).run();
+    await invalidateDetails(series_url, env);
     return jsonResponse({ ok: true }, corsHeaders);
   } catch (err) {
     return jsonResponse({ error: err.message }, corsHeaders, 500);
@@ -1013,21 +1105,30 @@ async function handleDeleteEpisode(url, env, corsHeaders) {
     if (!seriesUrl || !season || !episode) return jsonResponse({ error: 'Missing params' }, corsHeaders, 400);
     await env.DB.prepare('DELETE FROM episode_metadata WHERE series_url = ? AND season = ? AND episode = ?')
       .bind(seriesUrl, parseInt(season), parseInt(episode)).run();
+    await invalidateDetails(seriesUrl, env);
     return jsonResponse({ ok: true }, corsHeaders);
   } catch (err) {
     return jsonResponse({ error: err.message }, corsHeaders, 500);
   }
 }
 
-async function handleLinks(targetUrl, corsHeaders) {
+async function handleLinks(targetUrl, corsHeaders, env) {
   try {
-    if (targetUrl.includes('cinecalidad')) {
-      return jsonResponse(await getCinecalidadLinks(targetUrl), corsHeaders);
-    } else if (targetUrl.includes('cuevana')) {
-      return jsonResponse(await getCuevanaLinks(targetUrl), corsHeaders);
-    } else {
-      return jsonResponse(await getPelisplusHDLinks(targetUrl), corsHeaders);
+    if (!assertSafeUrl(targetUrl, PROVIDER_ALLOWED_HOSTS)) {
+      return jsonResponse({ error: 'URL no permitida' }, corsHeaders, 403);
     }
+    const cacheKey = 'links/v1/' + encodeURIComponent(targetUrl);
+    const hit = await cacheGet(cacheKey);
+    if (hit) return hit;
+    let links;
+    if (targetUrl.includes('cinecalidad')) {
+      links = await getCinecalidadLinks(targetUrl);
+    } else if (targetUrl.includes('cuevana')) {
+      links = await getCuevanaLinks(targetUrl);
+    } else {
+      links = await getPelisplusHDLinks(targetUrl);
+    }
+    return cachePut(cacheKey, links, 600, corsHeaders, env);
   } catch (err) {
     return jsonResponse({ error: err.message }, corsHeaders, 500);
   }
@@ -1086,7 +1187,8 @@ async function handleGetByCategory(category, env, corsHeaders) {
       category: row.custom_category,
       metadata_id: row.id,
     }));
-    await Promise.all(items.map(async it => {
+    await mapLimit(items, 6, async it => {
+      if (!assertSafeUrl(it.url, PROVIDER_ALLOWED_HOSTS)) return;
       try {
         let details = null;
         if (it.url.includes('cinecalidad')) details = await getCinecalidadDetails(it.url);
@@ -1094,7 +1196,7 @@ async function handleGetByCategory(category, env, corsHeaders) {
         else details = await getPelisplusHDDetails(it.url);
         if (details && details.poster) it.poster = details.poster;
       } catch (e) {}
-    }));
+    });
     return jsonResponse(items, corsHeaders);
   } catch (err) {
     return jsonResponse({ error: err.message }, corsHeaders, 500);
@@ -1107,20 +1209,25 @@ async function handleSaveMetadata(request, env, corsHeaders) {
   if (!id || !title || !external_url) {
     return jsonResponse({ error: 'Missing required fields' }, corsHeaders, 400);
   }
-  if (!/cinecalidad|cuevana|pelisplushd/i.test(external_url)) {
+  if (!assertSafeUrl(external_url, PROVIDER_ALLOWED_HOSTS)) {
     return jsonResponse({ error: 'Dominio no permitido' }, corsHeaders, 400);
+  }
+  if (download_link && !assertSafeUrl(download_link)) {
+    return jsonResponse({ error: 'Enlace de descarga no válido' }, corsHeaders, 400);
   }
   await env.DB.prepare(`
     INSERT OR REPLACE INTO movie_metadata (id, title, external_url, custom_category, download_link, updated_at)
     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `).bind(id, title, external_url, custom_category || null, download_link || null).run();
   await invalidateMainPage(env);
+  await invalidateDetails(external_url, env);
   return jsonResponse({ success: true }, corsHeaders);
 }
 
 async function handleDeleteMetadata(externalUrl, env, corsHeaders) {
   await env.DB.prepare('DELETE FROM movie_metadata WHERE external_url = ?').bind(externalUrl).run();
   await invalidateMainPage(env);
+  await invalidateDetails(externalUrl, env);
   return jsonResponse({ success: true }, corsHeaders);
 }
 
@@ -1156,7 +1263,7 @@ const STREAM_HOSTS = [
   { re: /(?:streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash)/i, fn: extractStreamTape },
 ];
 
-const STREAM_IFRAME_ONLY = /(?:vidhidepro\.com|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com|acek-cdn\.com|dramiyos-cdn\.com|dood\.video|cloudatacdn\.com)/i;
+const STREAM_IFRAME_ONLY = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com|acek-cdn\.com|dramiyos-cdn\.com|dood\.video|cloudatacdn\.com)/i;
 
 function b64UrlDecode(str) {
   const fixed = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -1166,6 +1273,7 @@ function b64UrlDecode(str) {
 }
 
 async function fetchFollow(url, timeout = 8000) {
+  if (!assertSafeUrl(url)) throw new Error('URL no permitida');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -1312,7 +1420,7 @@ function unpackPacker(input) {
     const word = dict[i];
     if (!word) continue;
     const token = i.toString(a);
-    out = out.replace(new RegExp('\\b' + token + '\\b', 'g'), word);
+    out = out.replace(new RegExp('\\b' + token + '\\b', 'g'), () => word);
   }
   return out;
 }
@@ -1339,9 +1447,11 @@ function findStreamUrl(html) {
   return null;
 }
 
-async function extractOnce(targetUrl) {
+async function extractOnce(targetUrl, deadline) {
   let current = targetUrl;
   for (let hop = 0; hop < 4; hop++) {
+    if (deadline && Date.now() > deadline) return null;
+    if (!assertSafeUrl(current)) return null;
     const html = await fetchHTML(current, STREAM_TIMEOUT);
     const redirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
     if (redirectMatch) {
@@ -1369,7 +1479,33 @@ async function verifyStream(result) {
     const res = await fetch(result.url, { headers, redirect: 'follow', signal: controller.signal });
     if (!res.ok) return false;
     const text = await res.text();
-    return text.startsWith('#EXTM3U');
+    if (!text.trimStart().startsWith('#EXTM3U')) return false;
+    if (/#EXT-X-STREAM-INF/i.test(text)) return true;
+    const segMatch = text.match(/#EXTINF:[^,\n]+,?\s*\n\s*([^\s#][^\n]*)/);
+    if (!segMatch) return true;
+    const segUrl = new URL(segMatch[1], result.url).href;
+    const segController = new AbortController();
+    const segTimer = setTimeout(() => segController.abort(), 3000);
+    try {
+      const segRes = await fetch(segUrl, { headers, redirect: 'follow', signal: segController.signal });
+      if (!segRes.ok) return false;
+      const reader = segRes.body.getReader();
+      const start = Date.now();
+      let bytes = 0;
+      let elapsed = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.length;
+        elapsed = (Date.now() - start) / 1000;
+        if (elapsed >= 2.5) break;
+      }
+      return bytes / Math.max(elapsed, 0.1) >= 50 * 1024;
+    } catch (e) {
+      return false;
+    } finally {
+      clearTimeout(segTimer);
+    }
   } catch (e) {
     return false;
   } finally {
@@ -1377,15 +1513,30 @@ async function verifyStream(result) {
   }
 }
 
-async function handleStreamResolve(targetUrl, corsHeaders) {
+async function handleStreamResolve(targetUrl, corsHeaders, env) {
   try {
+    if (!assertSafeUrl(targetUrl, STREAM_ALLOWED_HOSTS)) {
+      return jsonResponse({ ok: false }, corsHeaders);
+    }
+    const cacheKey = 'stream/v1/' + encodeURIComponent(targetUrl);
+    const hit = await cacheGet(cacheKey);
+    if (hit) {
+      const cached = await hit.json();
+      if (cached && cached.ok && (cached.type !== 'hls' || await verifyStream(cached))) {
+        return jsonResponse(cached, corsHeaders);
+      }
+      await caches.default.delete(new Request(CACHE_HOST + '/' + cacheKey));
+      if (env && env.DB) {
+        await env.DB.prepare('DELETE FROM cache_keys WHERE key = ?').bind(cacheKey).run().catch(() => {});
+      }
+    }
     if (STREAM_IFRAME_ONLY.test(targetUrl)) {
       return jsonResponse({ ok: false }, corsHeaders);
     }
     const hostResult = await tryHostExtractors(targetUrl);
     if (hostResult) {
       if (await verifyStream(hostResult)) {
-        return jsonResponse({ ok: true, ...hostResult }, corsHeaders);
+        return cachePut(cacheKey, { ok: true, ...hostResult }, 300, corsHeaders, env);
       }
       return jsonResponse({ ok: false }, corsHeaders);
     }
@@ -1394,12 +1545,13 @@ async function handleStreamResolve(targetUrl, corsHeaders) {
     }
     const deadline = Date.now() + 15000;
     for (let attempt = 0; attempt < 4; attempt++) {
+      if (Date.now() > deadline) break;
       let result = null;
       try {
-        result = await extractOnce(targetUrl);
+        result = await extractOnce(targetUrl, deadline);
       } catch (e) {}
       if (result && (await verifyStream(result))) {
-        return jsonResponse({ ok: true, ...result }, corsHeaders);
+        return cachePut(cacheKey, { ok: true, ...result }, 300, corsHeaders, env);
       }
       if (attempt < 3 && Date.now() < deadline) await new Promise(r => setTimeout(r, 500));
     }
@@ -1417,25 +1569,35 @@ async function fetchM3U8WithRetry(targetUrl, ref) {
   if (ref) headers['Referer'] = ref;
   for (let attempt = 0; attempt < 3; attempt++) {
     let res;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
-      res = await fetch(targetUrl, { headers, redirect: 'follow' });
+      res = await fetch(targetUrl, { headers, redirect: 'follow', signal: controller.signal });
     } catch (err) {
+      clearTimeout(timer);
       await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       continue;
     }
+    clearTimeout(timer);
     if (!res.ok) {
       await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       continue;
     }
     const text = await res.text();
-    if (!text.startsWith('#EXTM3U')) {
+    if (!text.trimStart().startsWith('#EXTM3U')) {
       await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       continue;
     }
     const isMaster = /#EXT-X-STREAM-INF/i.test(text);
+    const base = new URL(targetUrl).href;
+    const absolutized = text.split('\n').map(line => {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) return line;
+      return new URL(t, base).href;
+    }).join('\n');
     const body = isMaster
-      ? text.replace(/CODECS="[^"]*",?/gi, '').replace(/,\s*,/g, ',').replace(/,[ \t]*(\r?\n)/g, '$1')
-      : text;
+      ? absolutized.replace(/CODECS="[^"]*",?/gi, '').replace(/,\s*,/g, ',').replace(/,[ \t]*(\r?\n)/g, '$1')
+      : absolutized;
     const out = new Headers();
     out.set('Access-Control-Allow-Origin', '*');
     out.set('Content-Type', res.headers.get('Content-Type') || 'application/vnd.apple.mpegurl');
@@ -1446,6 +1608,9 @@ async function fetchM3U8WithRetry(targetUrl, ref) {
 }
 
 async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
+  if (!assertSafeUrl(targetUrl, STREAM_ALLOWED_HOSTS)) {
+    return jsonResponse({ error: 'URL no permitida' }, corsHeaders, 403);
+  }
   const ref = reqUrl.searchParams.get('ref') || '';
   const range = request.headers.get('Range') || '';
   if (/\.(?:m3u8|txt)([?#]|$)/i.test(targetUrl)) {
@@ -1459,8 +1624,11 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
   if (range) headers['Range'] = range;
 
   for (let attempt = 0; attempt < 3; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const res = await fetch(targetUrl, { headers, redirect: 'follow' });
+      const res = await fetch(targetUrl, { headers, redirect: 'follow', signal: controller.signal });
+      clearTimeout(timer);
       if ((res.status === 403 || res.status === 429 || res.status >= 500) && attempt < 2) {
         await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
         continue;
@@ -1474,6 +1642,7 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
       outHeaders.set('Cache-Control', 'no-store');
       return new Response(res.body, { status: res.status, headers: outHeaders });
     } catch (err) {
+      clearTimeout(timer);
       if (attempt < 2) {
         await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
         continue;
@@ -1485,14 +1654,16 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
 
 // ==================== ADMIN: STATS / CACHE / CATEGORIAS ====================
 async function handleAdminStats(env, corsHeaders) {
-  const cats = await env.DB.prepare('SELECT COUNT(DISTINCT custom_category) c FROM movie_metadata WHERE custom_category IS NOT NULL AND custom_category != ""').first();
-  const meta = await env.DB.prepare('SELECT COUNT(*) c FROM movie_metadata').first();
-  const dl = await env.DB.prepare('SELECT COUNT(*) c FROM movie_metadata WHERE download_link IS NOT NULL AND download_link != ""').first();
-  const eps = await env.DB.prepare('SELECT COUNT(*) c FROM episode_metadata WHERE is_custom = 1').first();
-  const epLinks = await env.DB.prepare('SELECT COUNT(*) c FROM episode_metadata WHERE is_custom = 0 AND download_link IS NOT NULL AND download_link != ""').first();
-  const sSearch = await env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'search/%'").first();
-  const sHome = await env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'home/%' OR key = 'mainpage'").first();
-  const sOther = await env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key NOT LIKE 'search/%' AND key NOT LIKE 'home/%' AND key != 'mainpage'").first();
+  const [cats, meta, dl, eps, epLinks, sSearch, sHome, sOther] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(DISTINCT custom_category) c FROM movie_metadata WHERE custom_category IS NOT NULL AND custom_category != ""').first(),
+    env.DB.prepare('SELECT COUNT(*) c FROM movie_metadata').first(),
+    env.DB.prepare('SELECT COUNT(*) c FROM movie_metadata WHERE download_link IS NOT NULL AND download_link != ""').first(),
+    env.DB.prepare('SELECT COUNT(*) c FROM episode_metadata WHERE is_custom = 1').first(),
+    env.DB.prepare('SELECT COUNT(*) c FROM episode_metadata WHERE is_custom = 0 AND download_link IS NOT NULL AND download_link != ""').first(),
+    env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'search/%'").first(),
+    env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'home/%'").first(),
+    env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key NOT LIKE 'search/%' AND key NOT LIKE 'home/%'").first(),
+  ]);
   return jsonResponse({
     categories: cats.c, metadata: meta.c, with_download: dl.c,
     custom_episodes: eps.c, episode_links: epLinks.c,
@@ -1505,7 +1676,7 @@ async function handleCachePurge(request, env, corsHeaders) {
   if (!['all', 'search', 'home'].includes(scope)) {
     return jsonResponse({ error: 'Invalid scope' }, corsHeaders, 400);
   }
-  const where = scope === 'all' ? '' : scope === 'search' ? " WHERE key LIKE 'search/%'" : " WHERE key LIKE 'home/%' OR key = 'mainpage'";
+  const where = scope === 'all' ? '' : scope === 'search' ? " WHERE key LIKE 'search/%'" : " WHERE key LIKE 'home/%'";
   const { results } = await env.DB.prepare('SELECT key FROM cache_keys' + where).all();
   let deleted = 0;
   for (const row of results) {
@@ -1513,7 +1684,8 @@ async function handleCachePurge(request, env, corsHeaders) {
     deleted++;
   }
   await env.DB.prepare('DELETE FROM cache_keys' + where).run();
-  return jsonResponse({ success: true, deleted }, corsHeaders);
+  const stale = await env.DB.prepare("DELETE FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").run();
+  return jsonResponse({ success: true, deleted, stale: stale.meta.changes || 0 }, corsHeaders);
 }
 
 async function handleCategoryRename(request, env, corsHeaders) {
