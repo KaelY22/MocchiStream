@@ -11,42 +11,68 @@ export function loadHome() {
       ${Array.from({ length: 6 }).map(() => '<div class="skeleton skeleton-card"></div>').join('')}
     </div>
   `).join('');
-  fetch(`${API_BASE}/mainpage`)
+  fetch(`${API_BASE}/sections`)
     .then(res => res.json())
-    .then(data => {
-      const sections = (data && data.sections) || [];
-      if (sections.length === 0) {
+    .then(sections => {
+      if (!sections || sections.length === 0) {
         home.innerHTML = '<p class="empty-msg">No hay contenido disponible.</p>';
         return;
       }
-      home.innerHTML = sections.map(sec => `
-        <section class="home-section" data-slug="${esc(sec.slug)}">
-          <div class="section-head">
-            <h2 class="section-title">${esc(sec.title)}</h2>
-            <div class="sec-arrows">
-              <button class="sec-arrow prev" aria-label="Anterior">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
-              </button>
-              <button class="sec-arrow next" aria-label="Siguiente">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
-              </button>
-            </div>
-          </div>
-          <div class="grid-horizontal" data-page="1">${sec.items.map(cardHtml).join('')}</div>
-        </section>`;
-      }).join('');
-      [...home.querySelectorAll('.home-section')].forEach((sec, i) => {
-        sec.classList.add('enter');
-        sec.style.animationDelay = `${Math.min(i * 70, 420)}ms`;
-        sec.addEventListener('animationend', () => { sec.classList.remove('enter'); sec.style.animationDelay = ''; }, { once: true });
-      });
-      bindHomeEvents(home);
-      renderContinueRow();
+      home.innerHTML = '';
+      let idx = 0;
+      let pending = 0;
+      const finish = () => {
+        if (pending > 0) return;
+        if (!home.querySelector('.home-section')) {
+          home.innerHTML = '<p class="empty-msg">No hay contenido disponible.</p>';
+          return;
+        }
+        bindHomeEvents(home);
+        renderContinueRow();
+      };
+      const loadNext = () => {
+        if (idx >= sections.length) {
+          finish();
+          return;
+        }
+        const sec = sections[idx++];
+        pending++;
+        fetch(`${API_BASE}/mainpage?section=${encodeURIComponent(sec.slug)}`)
+          .then(res => res.json())
+          .then(items => {
+            if (items && items.length) appendSection(home, sec, items, idx - 1);
+          })
+          .catch(() => {})
+          .finally(() => { pending--; loadNext(); });
+      };
+      for (let k = 0; k < 4; k++) loadNext();
     })
     .catch(() => {
       home.dataset.loaded = '';
       home.innerHTML = '<p class="empty-msg">Error al cargar la portada. Recarga la página.</p>';
     });
+}
+
+function appendSection(home, sec, items, index) {
+  const el = document.createElement('section');
+  el.className = 'home-section enter';
+  el.dataset.slug = esc(sec.slug);
+  el.style.animationDelay = `${Math.min(index * 70, 420)}ms`;
+  el.innerHTML = `
+    <div class="section-head">
+      <h2 class="section-title">${esc(sec.title)}</h2>
+      <div class="sec-arrows">
+        <button class="sec-arrow prev" aria-label="Anterior">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <button class="sec-arrow next" aria-label="Siguiente">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="grid-horizontal" data-page="1">${items.map(cardHtml).join('')}</div>`;
+  home.appendChild(el);
+  el.addEventListener('animationend', () => { el.classList.remove('enter'); el.style.animationDelay = ''; }, { once: true });
 }
 
 export function renderContinueRow() {

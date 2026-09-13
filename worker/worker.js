@@ -43,6 +43,12 @@ export default {
     if (path === '/api/mainpage' && method === 'GET') {
       return handleMainPage(url, env, corsHeaders, key);
     }
+    if (path === '/api/sections' && method === 'GET') {
+      return jsonResponse([
+        ...HOME_SECTIONS.map(([s, t]) => ({ slug: s, title: t })),
+        ...GENRE_SECTIONS.map(([s, t]) => ({ slug: 'genero-' + s, title: t })),
+      ], corsHeaders);
+    }
     if (path === '/api/search' && method === 'GET') {
       const q = url.searchParams.get('q');
       if (!q) return jsonResponse({ error: 'Missing query' }, corsHeaders, 400);
@@ -278,19 +284,14 @@ async function discover(path, page, params, env, key) {
 }
 
 async function fetchTop10(url, env, key) {
-  const html = await fetchHTML(url, 10000);
-  const titles = [...html.matchAll(/data-uia="top10-table-row-title"[^>]*>([\s\S]*?)<\/button>/gi)]
-    .map(m => m[1].replace(/<[^>]*>/g, '').trim())
+  const [m, t] = await Promise.all([
+    tmdbGet('/trending/movie/week', {}, env, key, 86400),
+    tmdbGet('/trending/tv/week', {}, env, key, 86400),
+  ]);
+  return [...(m.results || []), ...(t.results || [])]
+    .slice(0, 10)
+    .map(r => toItem(r, true))
     .filter(Boolean);
-  const items = [];
-  for (const t of titles.slice(0, 10)) {
-    try {
-      const data = await tmdbGet('/search/multi', { query: t }, env, key, 3600);
-      const first = (data.results || []).find(r => r.media_type === 'movie' || r.media_type === 'tv');
-      if (first) items.push(toItem(first, true));
-    } catch (e) {}
-  }
-  return items;
 }
 
 async function homeSection(slug, page, env, key) {
@@ -352,8 +353,7 @@ async function handleMainPage(url, env, corsHeaders, key) {
   const sections = [];
   const seen = new Set();
   const results = await Promise.allSettled(
-    [...HOME_SECTIONS, ...GENRE_SECTIONS.map(([s, t]) => ['genero-' + s, t])]
-      .map(async ([slug, title]) => {
+    HOME_SECTIONS.slice(0, 3).map(async ([slug, title]) => {
         try {
           const items = await homeSection(slug, 1, env, key);
           return { slug, title, items: items.filter(it => {
