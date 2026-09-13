@@ -1,4 +1,4 @@
-const CACHE = 'mocchi-v30';
+const CACHE = 'mocchi-v31';
 const ASSETS = [
   '/',
   '/index.html',
