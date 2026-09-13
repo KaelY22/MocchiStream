@@ -19,7 +19,7 @@ let currentAudioTrack = -1;
 let currentSubTrack = -1;
 let currentSpeed = 1;
 
-const FAST_HOSTS = /(?:vimeos\.net|goodstream\.one|hlswish\.com|uqload\.[a-z]+)/i;
+const FAST_HOSTS = /(?:vimeos\.(?:net|zip)|goodstream\.one|hlswish\.com|uqload\.[a-z]+)/i;
 const IFRAME_HOSTS = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com)/i;
 
 export function initPlayer() {

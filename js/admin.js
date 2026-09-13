@@ -138,7 +138,7 @@ async function loadCategoriesView() {
             <div class="cat-item">
               <img class="cat-item-poster" src="${safeImg(item.poster)}" alt="" loading="lazy" />
               <span class="cat-item-title">${esc(item.title)}</span>
-              <span class="src-badge sb-${esc((item.source || '').toLowerCase())}">${esc(item.source || '')}</span>
+              ${item.source ? `<span class="src-badge sb-${esc(item.source.toLowerCase())}">${esc(item.source)}</span>` : ''}
               <button class="cat-item-move" onclick="moveCatItem(this)" data-url="${encodeURIComponent(item.url)}" title="Mover a otra categoría">↗</button>
               <button class="cat-item-del" onclick="deleteCatItem(this)" data-url="${encodeURIComponent(item.url)}" aria-label="Eliminar">&times;</button>
             </div>

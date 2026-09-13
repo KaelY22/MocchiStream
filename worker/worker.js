@@ -1,10 +1,8 @@
-// worker.js - MocchiStream (PelisplusHD + Cuevana) - V3
+// worker.js - MocchiStream (Pelispedia) - V4
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const CINECALIDAD_URL = 'https://www.cinecalidad.am';
-const CUEVANA_URL = 'https://wv3.cuevana3.eu';
-const PHD_URL = 'https://pelisplushd.bz';
-const PAGE_SIZE = 60;
+const PELISPEDIA_URL = 'https://pelispedia.mov';
+const PELISPEDIA_FALLBACK = 'https://pelispedia.ink';
 const CACHE_SEARCH_TTL = 300;
 const CACHE_MAIN_TTL = 300;
 const D1_CHUNK = 80;
@@ -17,6 +15,8 @@ const GENRE_SECTIONS = [
   ['ciencia-ficcion', 'Ciencia ficción'],
   ['comedia', 'Comedia'],
   ['romance', 'Romance'],
+  ['drama', 'Drama'],
+  ['aventura', 'Aventura'],
 ];
 
 export default {
@@ -152,17 +152,19 @@ function jsonResponse(data, corsHeaders, status = 200) {
 
 const PRIVATE_HOST_RE = /(?:^|\.)(?:local|internal|localhost|lan)$|^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d)\.|0\.)/i;
 
-const PROVIDER_ALLOWED_HOSTS = ['pelisplushd.bz', 'cuevana3.eu', 'cinecalidad.am'];
+const PROVIDER_ALLOWED_HOSTS = ['pelispedia.mov', 'pelispedia.ink'];
 
 const STREAM_ALLOWED_HOSTS = [
-  'vimeos.net', 'goodstream.one', 'hlswish.com', 'uqload.*', 'vidhidepro.com', 'morencius.com',
+  'vimeos.net', 'vimeos.zip', 'goodstream.one', 'hlswish.com', 'uqload.*', 'vidhidepro.com', 'morencius.com',
   'streamwish.to', 'filemoon.sx', 'watchsb.com', 'lulustream.com', 'dood.la', 'doodstream.com',
   'dooood.com', 'doods.pro', 'd0000d.com', 'd000d.com', 'ds2play.com', 'ds2video.com',
   'myvidplay.com', 'playmogo.com', 'dood.video', 'byse.com', 'byse.sx', 'streamtape.com',
   'streamtape.net', 'streamtape.xyz', 'watchadsontape.com', 'shavetape.cash', 'vide0.net',
   'minochinos.com', 'acek-cdn.com', 'dramiyos-cdn.com', 'cloudatacdn.com', 'filelions.live',
   'filelions.online', 'filelions.to', 'embed69.org', 'xupalace.org', 'hglink.to',
-  'premilkyway.com', 'pelisplushd.bz', 'cuevana3.eu', 'cinecalidad.am'
+  'premilkyway.com', 'savefiles.com', 'mwish.pro', 'dwish.pro', 'embedwish.com', 'wishembed.pro',
+  'kswplayer.info', 'wishfast.top', 'streamwish.site', 'sfastwish.com', 'strwish.xyz', 'voe.sx',
+  'pelispedia.mov', 'pelispedia.ink'
 ];
 
 function hostAllowed(host, suffixes) {
@@ -273,23 +275,6 @@ function normTitle(t) {
     .trim();
 }
 
-function combineItems(phdHtml, cueHtml, cineHtml, opts = {}) {
-  const { filterAnime = false } = opts;
-  const phd = phdHtml ? dedupItems(extractPelisplusHDItems(phdHtml)) : [];
-  const cue = cueHtml ? dedupItems(extractCuevanaItems(cueHtml)) : [];
-  const cine = cineHtml ? dedupItems(extractCinecalidadItems(cineHtml)) : [];
-  const seen = new Set();
-  const out = [];
-  for (const it of [...phd, ...cue, ...cine]) {
-    if (filterAnime && /\/animes?\//.test(String(it.url || ''))) continue;
-    const k = normTitle(it.title);
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-  }
-  return out;
-}
-
 function decodeEntities(str) {
   return String(str)
     .replace(/&#0*38;|&amp;/g, '&')
@@ -302,250 +287,67 @@ function decodeEntities(str) {
     .replace(/&#0*160;|&nbsp;/g, ' ');
 }
 
-function fixHostsLinks(url) {
-  return url
-    .replace(/^https:\/\/hglink\.to/, 'https://streamwish.to')
-    .replace(/^https:\/\/swdyu\.com/, 'https://streamwish.to')
-    .replace(/^https:\/\/cybervynx\.com/, 'https://streamwish.to')
-    .replace(/^https:\/\/dumbalag\.com/, 'https://streamwish.to')
-    .replace(/^https:\/\/mivalyo\.com/, 'https://vidhidepro.com')
-    .replace(/^https:\/\/dinisglows\.com/, 'https://vidhidepro.com')
-    .replace(/^https:\/\/dhtpre\.com/, 'https://vidhidepro.com')
-    .replace(/^https:\/\/filemoon\.link/, 'https://filemoon.sx')
-    .replace(/^https:\/\/sblona\.com/, 'https://watchsb.com')
-    .replace(/^https:\/\/lulu\.st/, 'https://lulustream.com')
-    .replace(/^https:\/\/uqload\.io/, 'https://uqload.com')
-    .replace(/^https:\/\/do7go\.com/, 'https://dood.la');
+// ==================== SCRAPER PELISPEDIA ====================
+function normalizePelispediaUrl(u) {
+  return String(u).replace(PELISPEDIA_FALLBACK, PELISPEDIA_URL);
 }
 
-// ==================== PROVEEDOR 1: CINECALIDAD ====================
-const CINE_DEAD_HOSTS = /(?:voe\.sx|filemoon\.sx|youtube\.com|nicolehappyoutside\.com)/i;
+async function pelispediaFetch(pathOrUrl, timeout = 8000) {
+  const base = new URL(pathOrUrl, PELISPEDIA_URL).href;
+  const fallback = base.replace(PELISPEDIA_URL, PELISPEDIA_FALLBACK);
+  try {
+    return await fetchHTML(base, timeout);
+  } catch (e) {
+    if (fallback === base) throw e;
+    return await fetchHTML(fallback, timeout);
+  }
+}
 
-function extractCinecalidadItems(html) {
+function extractPelispediaItems(html) {
   const items = [];
-  const itemRegex = /<article[^>]*class="[^"]*item[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
-  let match;
-  while ((match = itemRegex.exec(html)) !== null) {
-    const block = match[1];
-    const titleMatch = block.match(/<div[^>]*class="[^"]*in_title[^"]*"[^>]*>([^<]*)<\/div>/i);
-    const linkMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>/i);
-    let poster = null;
-    const imgMatch = block.match(/<img[^>]*(?:data-src|src)="([^"]*)"[^>]*>/i);
-    if (imgMatch) {
-      let imgUrl = decodeEntities(imgMatch[1]);
-      if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
-      else if (imgUrl.startsWith('/')) imgUrl = CINECALIDAD_URL + imgUrl;
-      if (!imgUrl.includes('.svg') && !imgUrl.startsWith('data:')) poster = imgUrl;
-    }
-    if (titleMatch && linkMatch) {
-      let link = linkMatch[1];
-      if (link.startsWith('/')) link = CINECALIDAD_URL + link;
-      if (!/\/ver-pelicula\/|\/ver-serie\//.test(link)) continue;
-      items.push({
-        title: decodeEntities(titleMatch[1]).trim(),
-        url: link,
-        poster,
-        category: getCategoryFromCinecalidadUrl(link),
-        source: 'Cinecalidad',
-        external: true,
-      });
-    }
-  }
-  return items;
-}
-
-function getCategoryFromCinecalidadUrl(url) {
-  const match = url.match(/\/genero-de-la-pelicula\/([^\/]+)/);
-  if (match) return match[1].replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-  return 'Estrenos';
-}
-
-async function getCinecalidadDetails(targetUrl) {
-  const html = await fetchHTML(targetUrl);
-  const brandMatch = html.match(/<h1[^>]*class="[^"]*h1titlecc[^"]*"[^>]*>([^<]*)<\/h1>/i);
-  const brandName = brandMatch ? brandMatch[1].trim().toLowerCase() : 'cinecalidad';
-  let title = '';
-  const h1Regex = /<h1[^>]*>([^<]*)<\/h1>/gi;
-  let h1Match;
-  while ((h1Match = h1Regex.exec(html)) !== null) {
-    const candidate = h1Match[1].trim();
-    if (candidate && candidate.toLowerCase() !== brandName) {
-      title = candidate;
-      break;
-    }
-  }
-  const descMatch = html.match(/<div[^>]*class="[^"]*single_left[^"]*"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i);
-  let poster = null;
-  const posterMatch = html.match(/<img[^>]*(?:data-src|src)="([^"]*)"[^>]*class="[^"]*alignnone[^"]*"[^>]*>/i);
-  if (posterMatch) {
-    let imgUrl = decodeEntities(posterMatch[1]);
-    if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
-    else if (imgUrl.startsWith('/')) imgUrl = CINECALIDAD_URL + imgUrl;
-    if (!imgUrl.includes('.svg') && !imgUrl.startsWith('data:')) poster = imgUrl;
-  }
-
-  const isMovie = targetUrl.includes('/ver-pelicula/');
-  title = title || 'Sin título';
-  const description = descMatch
-    ? decodeEntities(descMatch[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')).trim()
-    : '';
-
-  if (isMovie) {
-    return { type: 'movie', title, description, poster, url: targetUrl, external: true, source: 'Cinecalidad' };
-  }
-
-  const episodes = [];
-  const epRegex = /<li[^>]*>([\s\S]*?)<\/li>/gi;
-  let epMatch;
-  while ((epMatch = epRegex.exec(html)) !== null) {
-    const block = epMatch[1];
-    if (!/episodiotitle/i.test(block)) continue;
-    const aMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
-    if (!aMatch) continue;
-    const name = decodeEntities(aMatch[2].replace(/<[^>]*>/g, '')).trim();
-    const seasonEpMatch = block.match(/S(\d+)\s*-\s*E(\d+)/i);
-    const season = seasonEpMatch ? parseInt(seasonEpMatch[1]) : null;
-    const episode = seasonEpMatch ? parseInt(seasonEpMatch[2]) : null;
-    const imgMatch = block.match(/<img[^>]*(?:data-src|src)="([^"]*)"[^>]*>/i);
-    let epPoster = null;
-    if (imgMatch && !imgMatch[1].includes('svg') && !imgMatch[1].startsWith('data:')) epPoster = imgMatch[1];
-    episodes.push({
-      name,
-      link: aMatch[1],
-      season,
-      episode,
-      poster: epPoster,
-    });
-  }
-  return {
-    type: 'series',
-    title,
-    description,
-    poster,
-    episodes,
-    url: targetUrl,
-    external: true,
-    source: 'Cinecalidad'
-  };
-}
-
-async function getCinecalidadLinks(targetUrl) {
-  const html = await fetchHTML(targetUrl);
-  const links = [];
-  const linkRegex = /<li[^>]*data-option="([^"]*)"[^>]*>/gi;
-  let match;
-  while ((match = linkRegex.exec(html)) !== null) {
-    links.push(fixHostsLinks(match[1]));
-  }
-  if (links.length === 0) {
-    const firstEp = html.match(/href="([^"]*ver-el-episodio\/[^"]*)"/i);
-    if (firstEp) {
-      try {
-        const epHtml = await fetchHTML(firstEp[1]);
-        while ((match = linkRegex.exec(epHtml)) !== null) {
-          links.push(fixHostsLinks(match[1]));
-        }
-      } catch (e) {}
-    }
-  }
-  const seen = new Set();
-  return links.filter(u => {
-    if (CINE_DEAD_HOSTS.test(u)) return false;
-    if (seen.has(u)) return false;
-    seen.add(u);
-    return true;
-  });
-}
-
-// ==================== PROVEEDOR 2: CUEVANA ====================
-function extractCuevanaItems(html) {
-  const items = [];
-  const itemRegex = /<li[^>]*class="[^"]*TPostMv[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
-  let match;
-  while ((match = itemRegex.exec(html)) !== null) {
-    const block = match[1];
-    const titleMatch = block.match(/<span[^>]*class="[^"]*Title[^"]*"[^>]*>([^<]*)<\/span>/i);
-    const linkMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>/i);
-    let poster = null;
-    const imgMatch = block.match(/<img[^>]*src="([^"]*)"[^>]*>/i);
-    if (imgMatch) {
-      let imgUrl = decodeEntities(imgMatch[1]);
-      if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
-      else if (imgUrl.startsWith('/')) imgUrl = CUEVANA_URL + imgUrl;
-      poster = imgUrl;
-    }
-    if (titleMatch && linkMatch) {
-      let link = linkMatch[1];
-      if (link.startsWith('/')) link = CUEVANA_URL + link;
-      if (!/\/ver-pelicula\/|\/ver-serie\//.test(link)) continue;
-      items.push({
-        title: decodeEntities(titleMatch[1]).trim(),
-        url: link,
-        poster: poster,
-        category: 'Estrenos',
-        source: 'Cuevana',
-        external: true,
-      });
-    }
-  }
-  return items;
-}
-
-// ==================== PROVEEDOR 3: PELISPLUSHD ====================
-function extractPelisplusHDItems(html) {
-  const items = [];
-  const cardRegex = /<a([^>]*class="Posters-link[^"]*"[^>]*)>([\s\S]*?)<\/a>/gi;
-  let match;
-  while ((match = cardRegex.exec(html)) !== null) {
-    const attrs = match[1];
-    const block = match[2];
-    const hrefMatch = attrs.match(/href="([^"]*)"/i);
-    if (!hrefMatch || !hrefMatch[1].includes('pelisplushd.bz')) continue;
-    const url = hrefMatch[1];
-    const imgMatch = block.match(/<img[^>]*src="([^"]*)"[^>]*>/i);
-    let title = null;
-    const titleMatch = block.match(/listing-content[^>]*>\s*<p>([^<]*)</i);
-    if (titleMatch) title = titleMatch[1];
-    if (!title) {
-      const dataTitle = attrs.match(/data-title="VER ([^(]*)\(/i);
-      if (dataTitle) title = dataTitle[1];
-    }
+  const cardRegex = /<a[^>]*href="([^"]*)"[^>]*class="[^"]*block h-full[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = cardRegex.exec(html)) !== null) {
+    const url = m[1];
+    if (!url.includes('pelispedia.') && !url.startsWith('/')) continue;
+    const imgMatch = m[2].match(/<img[^>]*src="([^"]*)"/i);
+    const titleMatch = m[2].match(/<h[234][^>]*>([\s\S]*?)<\/h[234]>/i);
+    if (!titleMatch) continue;
+    const title = decodeEntities(titleMatch[1].replace(/<[^>]*>/g, '')).trim();
     if (!title) continue;
-    title = decodeEntities(title).trim();
-    if (!title) continue;
+    const category = /\/anime\//.test(url) ? 'Anime' : /\/pelicula\//.test(url) ? 'Películas' : 'Series';
     items.push({
       title,
-      url,
-      poster: imgMatch && !imgMatch[1].includes('hover.png') ? imgMatch[1] : null,
-      category: url.includes('/serie/') ? 'Series' : url.includes('/anime/') ? 'Anime' : 'Películas',
-      source: 'PelisplusHD',
+      url: normalizePelispediaUrl(url),
+      poster: imgMatch ? imgMatch[1] : null,
+      category,
+      source: 'Pelispedia',
       external: true,
     });
   }
   return items;
 }
 
-async function getPelisplusHDDetails(targetUrl) {
-  const html = await fetchHTML(targetUrl);
-  const titleMatch = html.match(/<h1[^>]*class="[^"]*m-b-5[^"]*"[^>]*>\s*([^<]*)</i);
-  let title = titleMatch ? decodeEntities(titleMatch[1]).trim() : 'Sin título';
+async function getPelispediaDetails(targetUrl) {
+  const html = await pelispediaFetch(targetUrl);
+  const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  let title = h1Match ? decodeEntities(h1Match[1].replace(/<[^>]*>/g, '')).trim() : 'Sin título';
   const yearMatch = title.match(/\((\d{4})\)/);
   const year = yearMatch ? yearMatch[1] : null;
   title = title.replace(/\s*\(\d{4}\)\s*$/, '');
-  const descMatch = html.match(/<div[^>]*class="[^"]*text-large[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-  const description = descMatch ? decodeEntities(descMatch[1].replace(/<[^>]*>/g, '')).trim() : '';
+  const descMatch = html.match(/<meta[^>]*name="description"[^>]*content="([^"]*)"/i);
+  const description = descMatch ? decodeEntities(descMatch[1]).trim() : '';
   let poster = null;
-  const posterMatch = html.match(/<img[^>]*class="[^"]*img-fluid[^"]*"[^>]*?src="([^"]+)"[^>]*>/i)
-    || html.match(/<img[^>]*?src="([^"]+)"[^>]*class="[^"]*img-fluid[^"]*"[^>]*>/i);
-  if (posterMatch) poster = posterMatch[1];
-  if (!poster) {
-    const ogMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
-    if (ogMatch) poster = ogMatch[1];
-  }
+  const ogMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
+  if (ogMatch) poster = ogMatch[1];
+  const vidMatch = html.match(/<iframe[^>]*src="([^"]*\/vidurl\/[^"]*)"/i);
+  const vidPath = vidMatch ? vidMatch[1] : '';
+  const imdbMatch = vidPath.match(/tt\d+/i);
+  const imdb = imdbMatch ? imdbMatch[0] : null;
 
-  const isMovie = targetUrl.includes('/pelicula/');
+  const isMovie = /\/pelicula\//.test(targetUrl);
   if (isMovie) {
-    return { type: 'movie', title, description, poster, url: targetUrl, external: true, source: 'PelisplusHD' };
+    return { type: 'movie', title, description, poster, url: targetUrl, external: true, source: 'Pelispedia', year, imdb };
   }
 
   const episodes = [];
@@ -553,26 +355,28 @@ async function getPelisplusHDDetails(targetUrl) {
   let epMatch;
   while ((epMatch = epRegex.exec(html)) !== null) {
     let name = epMatch[4].replace(/<[^>]*>/g, '').trim();
-    name = name.replace(/T\d+.*E\d+:\s*/i, '').trim();
+    name = name.replace(/^E\d+\s*:\s*|^E\d+\s+/i, '').trim();
     episodes.push({
       name: decodeEntities(name) || 'Episodio ' + epMatch[3],
-      link: epMatch[1],
+      link: normalizePelispediaUrl(epMatch[1].startsWith('/') ? PELISPEDIA_URL + epMatch[1] : epMatch[1]),
       season: parseInt(epMatch[2]),
       episode: parseInt(epMatch[3]),
       poster: null,
     });
   }
+  return { type: 'series', title, description, poster, episodes, url: targetUrl, external: true, source: 'Pelispedia', year, imdb };
+}
 
-  return {
-    type: 'series',
-    title,
-    description,
-    poster,
-    episodes,
-    url: targetUrl,
-    external: true,
-    source: 'PelisplusHD'
-  };
+async function getPelispediaLinks(targetUrl) {
+  const html = await pelispediaFetch(targetUrl);
+  const vidMatch = html.match(/<iframe[^>]*src="([^"]*\/vidurl\/[^"]*)"/i);
+  if (!vidMatch) return [];
+  const vidUrl = vidMatch[1].startsWith('/') ? PELISPEDIA_URL + vidMatch[1] : vidMatch[1];
+  try {
+    return await extractEmbed69(vidUrl);
+  } catch (e) {
+    return [];
+  }
 }
 
 async function deriveAesKey(challenge, difficulty, salt) {
@@ -626,172 +430,7 @@ async function extractEmbed69(url) {
       if (!server.link) continue;
       try {
         const decrypted = await decryptAES(server.link, aesKey);
-        if (decrypted) links.push(fixHostsLinks(decrypted));
-      } catch (e) {}
-    }
-  }
-  return links;
-}
-
-async function getPelisplusHDLinks(targetUrl) {
-  const html = await fetchHTML(targetUrl);
-  const scriptMatch = html.match(/var video = \[\];([\s\S]*?)(?:<\/script>|$)/i);
-  const script = scriptMatch ? scriptMatch[1] : '';
-  const urlRegex = /(https?:\/\/[^\s"'\\]+)/g;
-  const embeds = [];
-  let m;
-  while ((m = urlRegex.exec(script)) !== null) {
-    const u = m[1].replace(/[);,'"]+$/, '');
-    if (!u.includes('http')) continue;
-    embeds.push(u);
-  }
-  const links = [];
-  await mapLimit(embeds, 4, async u => {
-    if (u.includes('embed69.org')) {
-      try {
-        links.push(...await extractEmbed69(u));
-      } catch (e) {}
-    } else if (u.includes('xupalace.org/video')) {
-      try {
-        const page = await fetchHTML(u);
-        const re = /(?:go_to_player|go_to_playerVast)\('(.*?)'/g;
-        let g;
-        while ((g = re.exec(page)) !== null) links.push(fixHostsLinks(g[1]));
-      } catch (e) {}
-    } else {
-      try {
-        const page = await fetchHTML(u);
-        const iframeMatch = page.match(/<iframe[^>]*src="([^"]*)"/i);
-        if (iframeMatch) links.push(fixHostsLinks(iframeMatch[1]));
-      } catch (e) {}
-    }
-  });
-  if (links.length === 0) {
-    const firstEp = html.match(/href="([^"]*\/temporada\/\d+\/capitulo\/\d+)"[^>]*>/i);
-    if (firstEp && firstEp[1] !== targetUrl) {
-      try {
-        return await getPelisplusHDLinks(firstEp[1]);
-      } catch (e) {}
-    }
-  }
-  const liveLinks = links.filter(u => !CUEVANA_DEAD_HOSTS.test(u));
-  return liveLinks.length > 0 ? liveLinks : links;
-}
-
-async function getCuevanaDetails(targetUrl) {
-  const html = await fetchHTML(targetUrl);
-  const titleMatch = html.match(/<h1[^>]*class="[^"]*Title[^"]*"[^>]*>([^<]*)<\/h1>/i);
-  const descMatch = html.match(/<div[^>]*class="[^"]*Description[^"]*"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i);
-  let poster = null;
-  const posterMatch = html.match(/<div[^>]*class="[^"]*Image[^"]*"[^>]*>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*>/i);
-  if (posterMatch) {
-    let imgUrl = decodeEntities(posterMatch[1]);
-    if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
-    else if (imgUrl.startsWith('/')) imgUrl = CUEVANA_URL + imgUrl;
-    poster = imgUrl;
-  }
-
-  const isMovie = targetUrl.includes('/ver-pelicula/');
-  const title = titleMatch ? titleMatch[1].trim() : 'Sin título';
-  const description = descMatch ? descMatch[1].trim() : '';
-
-  if (isMovie) {
-    return { type: 'movie', title, description, poster, url: targetUrl, external: true, source: 'Cuevana' };
-  }
-
-  let episodes = [];
-  const scriptMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-  if (scriptMatch) {
-    try {
-      const jsonData = JSON.parse(scriptMatch[1]);
-      const series = jsonData?.props?.pageProps?.thisSerie;
-      const serieName = series?.slug?.name || '';
-      if (series && series.seasons) {
-        for (const season of series.seasons) {
-          for (const ep of season.episodes) {
-            const epLink = serieName
-              ? `${CUEVANA_URL}/episodio/${serieName}-temporada-${season.number}-episodio-${ep.number}`
-              : '';
-            episodes.push({
-              name: decodeEntities(ep.title || 'Episodio'),
-              link: epLink,
-              season: season.number,
-              episode: ep.number,
-              poster: ep.image || null,
-            });
-          }
-        }
-      }
-    } catch (e) {}
-  }
-
-  return {
-    type: 'series',
-    title,
-    description,
-    poster,
-    episodes,
-    url: targetUrl,
-    external: true,
-    source: 'Cuevana'
-  };
-}
-
-const CUEVANA_DEAD_HOSTS = /(?:streamwish\.to|hglink\.to|swdyu\.com|cybervynx\.com|dumbalag\.com|voe\.sx)/i;
-
-async function extractCuevanaLinksFromHtml(html) {
-  const links = [];
-  const seen = new Set();
-  const dataTrRegex = /data-tr="([^"]*)"/gi;
-  const iframes = [];
-  let match;
-  while ((match = dataTrRegex.exec(html)) !== null) {
-    const iframeUrl = match[1];
-    if (!iframeUrl || seen.has(iframeUrl)) continue;
-    seen.add(iframeUrl);
-    iframes.push(iframeUrl);
-  }
-  await mapLimit(iframes, 4, async iframeUrl => {
-    try {
-      const iframeHtml = await fetchHTML(iframeUrl);
-      const urlMatch = iframeHtml.match(/var url = '([^']*)';/i);
-      if (!urlMatch) return;
-      let videoUrl = fixHostsLinks(urlMatch[1]);
-      if (!videoUrl || CUEVANA_DEAD_HOSTS.test(videoUrl)) return;
-      if (!links.includes(videoUrl)) links.push(videoUrl);
-    } catch (e) {}
-  });
-  return links;
-}
-
-async function getCuevanaLinks(targetUrl) {
-  const html = await fetchHTML(targetUrl);
-  let links = await extractCuevanaLinksFromHtml(html);
-  if (links.length === 0) {
-    const firstEp = html.match(/href="(\/episodio\/[^"]*)"/i);
-    if (firstEp) {
-      try {
-        const epHtml = await fetchHTML(CUEVANA_URL + firstEp[1]);
-        links = await extractCuevanaLinksFromHtml(epHtml);
-      } catch (e) {}
-    }
-  }
-  if (links.length === 0) {
-    const scriptMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-    if (scriptMatch) {
-      try {
-        const jsonData = JSON.parse(scriptMatch[1]);
-        const series = jsonData?.props?.pageProps?.thisSerie;
-        const serieName = series?.slug?.name || '';
-        for (const season of series?.seasons || []) {
-          const eps = season?.episodes || [];
-          if (eps.length > 0) {
-            const epUrl = `${CUEVANA_URL}/episodio/${serieName}-temporada-${season.number}-episodio-${eps[0].number}`;
-            const epHtml = await fetchHTML(epUrl);
-            links = await extractCuevanaLinksFromHtml(epHtml);
-            break;
-          }
-        }
+        if (decrypted && !links.includes(decrypted)) links.push(decrypted);
       } catch (e) {}
     }
   }
@@ -819,18 +458,13 @@ async function handleMainPage(url, env, corsHeaders) {
   const sourceKey = source ? '/' + source.toLowerCase() : '';
   const filterBySource = arr => (source ? arr.filter(it => (it.source || '') === source) : arr);
 
-  const fetchTriple = async (phdUrl, cueUrl, cineUrl, opts = {}) => {
-    const [a, b, c] = await Promise.allSettled([
-      fetchHTML(phdUrl),
-      cueUrl ? fetchHTML(cueUrl) : Promise.resolve(''),
-      cineUrl ? fetchHTML(cineUrl) : Promise.resolve('')
-    ]);
-    return combineItems(
-      a.status === 'fulfilled' ? a.value : '',
-      b.status === 'fulfilled' ? b.value : '',
-      c.status === 'fulfilled' ? c.value : '',
-      opts
-    );
+  const fetchSection = async (path) => {
+    try {
+      const html = await pelispediaFetch(`${PELISPEDIA_URL}${path}`);
+      return dedupItems(extractPelispediaItems(html));
+    } catch (e) {
+      return [];
+    }
   };
 
   if (section) {
@@ -838,17 +472,17 @@ async function handleMainPage(url, env, corsHeaders) {
     const hit = await cacheGet(key);
     if (hit) return hit;
     let items = [];
-    if (section === 'peliculas-phd') {
-      items = await fetchTriple(`${PHD_URL}/peliculas?page=${page}`, `${CUEVANA_URL}/peliculas${page > 1 ? `/page/${page}/` : ''}`, '');
-    } else if (section === 'series-phd') {
-      items = await fetchTriple(`${PHD_URL}/series?page=${page}`, `${CUEVANA_URL}/series${page > 1 ? `/page/${page}/` : ''}`, `${CINECALIDAD_URL}/ver-serie/${page > 1 ? `page/${page}/` : ''}`);
+    if (section === 'peliculas') {
+      items = await fetchSection(`/peliculas?page=${page}`);
+    } else if (section === 'series') {
+      items = await fetchSection(`/series?page=${page}`);
+    } else if (section === 'anime') {
+      items = await fetchSection(`/animes?page=${page}`);
     } else if (section === 'estrenos') {
-      items = await fetchTriple(`${PHD_URL}/?page=${page}`, `${CUEVANA_URL}/page/${page}/`, `${CINECALIDAD_URL}/page/${page}/`, { filterAnime: true });
+      items = await fetchSection(`/peliculas?page=${page}`);
     } else if (section.startsWith('genero-')) {
       const genre = section.slice('genero-'.length);
-      items = await fetchTriple(`${PHD_URL}/generos/${genre}?page=${page}`, `${CUEVANA_URL}/genero/${genre}${page > 1 ? `/page/${page}/` : ''}`, `${CINECALIDAD_URL}/genero-de-la-pelicula/${genre}${page > 1 ? `/page/${page}/` : ''}`, { filterAnime: true });
-    } else if (section === 'anime') {
-      items = await fetchTriple(`${PHD_URL}/animes?page=${page}`, '', '');
+      items = await fetchSection(`/generos/${genre}?page=${page}`);
     }
     items = filterBySource(items);
     if (!items.length) return jsonResponse([], corsHeaders);
@@ -860,23 +494,11 @@ async function handleMainPage(url, env, corsHeaders) {
   const hit = await cacheGet(key);
   if (hit) return hit;
 
-  const fetchCineHome = async () => {
-    try {
-      return await fetchHTML(CINECALIDAD_URL + '/');
-    } catch (e) {
-      try { return await fetchHTML(CINECALIDAD_URL + '/page/1/'); } catch (e2) { return ''; }
-    }
-  };
-
-  const [phdPelis, phdSeries, phdHome, cueHome, cuePelis, cueSeries, cineHome, cineSeries] = await Promise.allSettled([
-    fetchHTML(PHD_URL + '/peliculas?page=1'),
-    fetchHTML(PHD_URL + '/series?page=1'),
-    fetchHTML(PHD_URL + '/'),
-    fetchHTML(CUEVANA_URL + '/'),
-    fetchHTML(CUEVANA_URL + '/peliculas'),
-    fetchHTML(CUEVANA_URL + '/series'),
-    fetchHTML(CINECALIDAD_URL + '/ver-serie/'),
-    fetchCineHome(),
+  const [pelis, series, anime, home] = await Promise.allSettled([
+    pelispediaFetch(`${PELISPEDIA_URL}/peliculas?page=1`),
+    pelispediaFetch(`${PELISPEDIA_URL}/series?page=1`),
+    pelispediaFetch(`${PELISPEDIA_URL}/animes?page=1`),
+    pelispediaFetch(`${PELISPEDIA_URL}/`),
   ]);
 
   const sections = [];
@@ -898,27 +520,22 @@ async function handleMainPage(url, env, corsHeaders) {
     sec.items.push(...fresh);
   };
 
-  addItemsToSection(filterBySource(combineItems(phdPelis.status === 'fulfilled' ? phdPelis.value : '', cuePelis.status === 'fulfilled' ? cuePelis.value : '', '')), 'peliculas-phd', 'Películas', true);
-  addItemsToSection(filterBySource(combineItems(phdSeries.status === 'fulfilled' ? phdSeries.value : '', cueSeries.status === 'fulfilled' ? cueSeries.value : '', cineSeries.status === 'fulfilled' ? cineSeries.value : '')), 'series-phd', 'Series', true);
-  addItemsToSection(filterBySource(combineItems(phdHome.status === 'fulfilled' ? phdHome.value : '', cueHome.status === 'fulfilled' ? cueHome.value : '', cineHome.status === 'fulfilled' ? cineHome.value : '', { filterAnime: true })), 'estrenos', 'Estrenos', true);
+  let homeItems = dedupItems(extractPelispediaItems(home.status === 'fulfilled' ? home.value : ''));
+  if (!homeItems.length) {
+    homeItems = dedupItems(extractPelispediaItems(pelis.status === 'fulfilled' ? pelis.value : ''));
+  }
+  addItemsToSection(filterBySource(homeItems), 'estrenos', 'Estrenos', true);
+  addItemsToSection(filterBySource(dedupItems(extractPelispediaItems(pelis.status === 'fulfilled' ? pelis.value : ''))), 'peliculas', 'Películas', true);
+  addItemsToSection(filterBySource(dedupItems(extractPelispediaItems(series.status === 'fulfilled' ? series.value : ''))), 'series', 'Series', true);
+  addItemsToSection(filterBySource(dedupItems(extractPelispediaItems(anime.status === 'fulfilled' ? anime.value : ''))), 'anime', 'Anime', true);
+
   const genreRes = await Promise.allSettled(GENRE_SECTIONS.map(async ([slug, title]) => {
     try {
-      const items = await fetchTriple(`${PHD_URL}/generos/${slug}?page=1`, `${CUEVANA_URL}/genero/${slug}`, `${CINECALIDAD_URL}/genero-de-la-pelicula/${slug}/`, { filterAnime: true });
-      return { slug: 'genero-' + slug, title, items: filterBySource(items) };
+      const html = await pelispediaFetch(`${PELISPEDIA_URL}/generos/${slug}?page=1`);
+      return { slug: 'genero-' + slug, title, items: filterBySource(dedupItems(extractPelispediaItems(html))) };
     } catch (e) { return { slug: 'genero-' + slug, title, items: [] }; }
   }));
   for (const r of genreRes) {
-    if (r.status === 'fulfilled' && r.value.items.length) {
-      addItemsToSection(r.value.items, r.value.slug, r.value.title, true, false);
-    }
-  }
-  const animeRes = await Promise.allSettled([(async () => {
-    try {
-      const html = await fetchHTML(`${PHD_URL}/animes?page=1`);
-      return { slug: 'anime', title: 'Anime', items: filterBySource(dedupItems(extractPelisplusHDItems(html))) };
-    } catch (e) { return { slug: 'anime', title: 'Anime', items: [] }; }
-  })()]);
-  for (const r of animeRes) {
     if (r.status === 'fulfilled' && r.value.items.length) {
       addItemsToSection(r.value.items, r.value.slug, r.value.title, true, false);
     }
@@ -945,32 +562,12 @@ function cleanQuery(q) {
     .trim();
 }
 
-async function searchAllProviders(query) {
-  const [phdResult, cueResult, cineResult] = await Promise.allSettled([
-    fetchHTML(`${PHD_URL}/search?s=${encodeURIComponent(query)}`),
-    fetchHTML(`${CUEVANA_URL}/search?q=${encodeURIComponent(query)}`),
-    fetchHTML(`${CINECALIDAD_URL}/?s=${encodeURIComponent(query)}`)
-  ]);
-
-  let items = [];
-  if (phdResult.status === 'fulfilled' && phdResult.value) {
-    items = items.concat(extractPelisplusHDItems(phdResult.value));
-  }
-  if (cueResult.status === 'fulfilled' && cueResult.value) {
-    items = items.concat(extractCuevanaItems(cueResult.value));
-  }
-  if (cineResult.status === 'fulfilled' && cineResult.value) {
-    items = items.concat(extractCinecalidadItems(cineResult.value));
-  }
-  return items;
-}
-
 async function handleSearch(query, page, env, corsHeaders, source) {
   if (!query || query.trim() === '') {
     return handleMainPage(new URL('https://localhost/api/mainpage'), env, corsHeaders);
   }
 
-  const cacheKey = 'search/v4/' + encodeURIComponent(query.trim().toLowerCase()) + (source ? '/' + source.toLowerCase() : '');
+  const cacheKey = 'search/v5/' + encodeURIComponent(query.trim().toLowerCase()) + (source ? '/' + source.toLowerCase() : '');
   const hit = await cacheGet(cacheKey);
   if (hit) return hit;
 
@@ -982,7 +579,11 @@ async function handleSearch(query, page, env, corsHeaders, source) {
   const seen = new Set();
   for (const variant of variants) {
     if (combined.length > 0) break;
-    const items = await searchAllProviders(variant);
+    let items = [];
+    try {
+      const html = await pelispediaFetch(`${PELISPEDIA_URL}/search?s=${encodeURIComponent(variant)}`);
+      items = dedupItems(extractPelispediaItems(html));
+    } catch (e) {}
     combined = items.filter(it => {
       const key = it.url;
       if (seen.has(key)) return false;
@@ -995,7 +596,7 @@ async function handleSearch(query, page, env, corsHeaders, source) {
     return cachePut(cacheKey, [], CACHE_SEARCH_TTL, corsHeaders, env);
   }
 
-  if (source) combined = combined.filter(it => (it.source || '') === source);
+  if (source) combined = combined.filter(it => (it.source || '').toLowerCase() === source.toLowerCase());
   if (combined.length === 0) {
     return cachePut(cacheKey, [], CACHE_SEARCH_TTL, corsHeaders, env);
   }
@@ -1013,14 +614,7 @@ async function handleDetails(targetUrl, corsHeaders, env) {
     const cacheKey = 'details/v1/' + encodeURIComponent(targetUrl);
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
-    let details;
-    if (targetUrl.includes('cinecalidad')) {
-      details = await getCinecalidadDetails(targetUrl);
-    } else if (targetUrl.includes('cuevana')) {
-      details = await getCuevanaDetails(targetUrl);
-    } else {
-      details = await getPelisplusHDDetails(targetUrl);
-    }
+    const details = await getPelispediaDetails(targetUrl);
     if (details && details.type === 'series' && env && env.DB) {
       const { results } = await env.DB.prepare(
         'SELECT season, episode, name, download_link, is_custom FROM episode_metadata WHERE series_url = ?'
@@ -1120,14 +714,7 @@ async function handleLinks(targetUrl, corsHeaders, env) {
     const cacheKey = 'links/v1/' + encodeURIComponent(targetUrl);
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
-    let links;
-    if (targetUrl.includes('cinecalidad')) {
-      links = await getCinecalidadLinks(targetUrl);
-    } else if (targetUrl.includes('cuevana')) {
-      links = await getCuevanaLinks(targetUrl);
-    } else {
-      links = await getPelisplusHDLinks(targetUrl);
-    }
+    const links = await getPelispediaLinks(targetUrl);
     return cachePut(cacheKey, links, 600, corsHeaders, env);
   } catch (err) {
     return jsonResponse({ error: err.message }, corsHeaders, 500);
@@ -1157,7 +744,7 @@ async function enrichItems(items, env) {
       item.metadata_id = meta.id;
     }
     if (!item.category) {
-      item.category = item.source === 'Cinecalidad' ? getCategoryFromCinecalidadUrl(item.url) : 'Estrenos';
+      item.category = 'Estrenos';
     }
     return item;
   });
@@ -1190,10 +777,7 @@ async function handleGetByCategory(category, env, corsHeaders) {
     await mapLimit(items, 6, async it => {
       if (!assertSafeUrl(it.url, PROVIDER_ALLOWED_HOSTS)) return;
       try {
-        let details = null;
-        if (it.url.includes('cinecalidad')) details = await getCinecalidadDetails(it.url);
-        else if (it.url.includes('cuevana')) details = await getCuevanaDetails(it.url);
-        else details = await getPelisplusHDDetails(it.url);
+        const details = await getPelispediaDetails(it.url);
         if (details && details.poster) it.poster = details.poster;
       } catch (e) {}
     });
@@ -1258,12 +842,13 @@ async function handleDeleteAvatar(env, corsHeaders) {
 const STREAM_TIMEOUT = 12000;
 
 const STREAM_HOSTS = [
-  { re: /(?:doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com)/i, fn: extractDoodstream },
+  { re: /(?:doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch|video)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com)/i, fn: extractDoodstream },
   { re: /byse\w*\.(?:com|sx)/i, fn: extractByse },
   { re: /(?:streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash)/i, fn: extractStreamTape },
+  { re: /(?:hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|embedwish\.com|wishembed\.pro|kswplayer\.info|wishfast\.top|streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to)/i, fn: extractStreamWish },
 ];
 
-const STREAM_IFRAME_ONLY = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com|acek-cdn\.com|dramiyos-cdn\.com|dood\.video|cloudatacdn\.com)/i;
+const STREAM_IFRAME_ONLY = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|vide0\.net|minochinos\.com|acek-cdn\.com|dramiyos-cdn\.com|cloudatacdn\.com|voe\.sx)/i;
 
 function b64UrlDecode(str) {
   const fixed = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -1368,6 +953,17 @@ async function extractStreamTape(url) {
     url: final,
     referer: url
   };
+}
+
+async function extractStreamWish(url) {
+  let target = url;
+  const m = url.match(/\/([fe])\/([^/]+)/);
+  if (m) target = new URL(m[2], new URL(url).origin).href;
+  const html = await fetchHTML(target, STREAM_TIMEOUT);
+  const unpacked = unpackPacker(html);
+  const found = findStreamUrl(unpacked) || findStreamUrl(html);
+  if (found) return { ...found, referer: new URL(target).origin };
+  return null;
 }
 
 async function tryHostExtractors(targetUrl) {
@@ -1530,9 +1126,6 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
         await env.DB.prepare('DELETE FROM cache_keys WHERE key = ?').bind(cacheKey).run().catch(() => {});
       }
     }
-    if (STREAM_IFRAME_ONLY.test(targetUrl)) {
-      return jsonResponse({ ok: false }, corsHeaders);
-    }
     const hostResult = await tryHostExtractors(targetUrl);
     if (hostResult) {
       if (await verifyStream(hostResult)) {
@@ -1541,6 +1134,9 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
       return jsonResponse({ ok: false }, corsHeaders);
     }
     if (STREAM_HOSTS.some(h => h.re.test(targetUrl))) {
+      return jsonResponse({ ok: false }, corsHeaders);
+    }
+    if (STREAM_IFRAME_ONLY.test(targetUrl)) {
       return jsonResponse({ ok: false }, corsHeaders);
     }
     const deadline = Date.now() + 15000;
@@ -1695,4 +1291,3 @@ async function handleCategoryRename(request, env, corsHeaders) {
   await invalidateMainPage(env);
   return jsonResponse({ success: true }, corsHeaders);
 }
-

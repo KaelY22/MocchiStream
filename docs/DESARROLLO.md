@@ -1,7 +1,5 @@
 # MocchiStream — Documentación técnica
 
-# MocchiStream
-
 > Sistema de streaming personal — Cloudflare Pages + Worker con D1.
 > README de uso interno (para Kael).
 
@@ -9,7 +7,7 @@
 
 ## Qué es
 
-Web app de streaming con 3 proveedores: **PelisplusHD (principal)** + **Cuevana (secundario)** + **Cinecalidad (discreta)**. Busca, ve portada por secciones, abre detalles y reproduce en **reproductor propio sin anuncios** (el worker extrae el m3u8 directo) con fallback a iframe cuando la fuente no se puede resolver. Incluye admin privado para categorías personalizadas y enlaces de descarga por capítulo.
+Web app de streaming con **proveedor único: Pelispedia**. Busca, ve portada por secciones, abre detalles y reproduce en **reproductor propio sin anuncios** (el worker extrae el m3u8 directo) con fallback a iframe cuando la fuente no se puede resolver. Incluye admin privado para categorías personalizadas y enlaces de descarga por capítulo.
 
 **URL**: `https://mocchi-stream.pages.dev`
 **Worker**: `mocchistream` (`mocchistream.kael-iv22.workers.dev`)
@@ -21,7 +19,7 @@ Web app de streaming con 3 proveedores: **PelisplusHD (principal)** + **Cuevana 
 
 - Frontend: HTML + CSS + JS vanilla, **ES modules sin build** (sin TypeScript, sin frameworks)
 - Deploy: Cloudflare Pages (`mocchi-stream`) + Worker (`mocchistream`) con D1
-- Reproductor: `hls.min.js` 1.5.13 local (jsdelivr) — HLS propio vía worker `/api/stream` + `/api/proxy`
+- Reproductor: `hls.min.js` 1.7.0 local — HLS propio vía worker `/api/stream` + `/api/proxy`
 - Fuentes tipográficas y de iconos LOCALES (`css/fonts/`) — sin CDNs
 - PWA: manifest + service worker + iconos generados
 
@@ -34,7 +32,7 @@ MocchiStream/
 ├── index.html            → SPA (Selecciones + 5 vistas)
 ├── admin.html            → Panel privado (/admin, redirect 308)
 ├── manifest.webmanifest  → PWA (standalone)
-├── sw.js                 → Service worker (CACHE=mocchi-v12)
+├── sw.js                 → Service worker (CACHE=mocchi-v29)
 ├── css/
 │   ├── style.css         → Diseño Apple HIG oscuro (tokens, glass solo en capa funcional)
 │   ├── fonts-material.css
@@ -42,18 +40,16 @@ MocchiStream/
 ├── icons/                → icon-192.png, icon-512.png
 ├── js/
 │   ├── utils.js          → API_BASE, STORAGE_VERSION (v5), esc, showToast, loadLS/saveLS
-│   ├── catalog.js        → favs/history/watchLater, cardHtml, getItemType, cleanStale
-│   ├── home.js           → Selecciones/Explorar, hero, secciones combinadas, scroll infinito
-│   ├── search.js         → búsqueda con debounce, grupos por fuente, chips
+│   ├── catalog.js        → favs/history/watchLater, cardHtml, getItemType, cleanStale (solo Pelispedia)
+│   ├── home.js           → Selecciones/Explorar, secciones, scroll infinito
+│   ├── search.js         → búsqueda con debounce, filtros por tipo
 │   ├── categories.js     → tiles de categorías personalizadas
 │   ├── library.js        → tabs Favoritos / Historial / Ver después
 │   ├── detail.js         → detalle full-screen, temporadas, episodios, compartir
 │   ├── player.js         → sheet de fuentes + reproductor propio/iframe + tags
 │   └── app.js            → boot, router, nav, PTR, deep link ?t=, admin modal
 └── worker/
-    ├── worker.js               → Worker actual (V3.6)
-    ├── worker.original.js      → backup pre-V2 (08-13)
-    └── worker.sololatino.bak.js → backup pre-PelisplusHD (08-13)
+    └── worker.js         → Worker actual (V4, proveedor único Pelispedia)
 ```
 
 ---
@@ -61,22 +57,22 @@ MocchiStream/
 ## Funcionalidades
 
 ### Frontend
-- **Selecciones** = inicio (títulos curados por Kael) + **Explorar** = todo el contenido (9 secciones: Películas, Series, Estrenos + 6 géneros, con **animes separados**)
-- Secciones **combinadas PHD+Cuevana+Cinecalidad** con dedup por título normalizado (`normTitle`), badge de fuente por proveedor (`.sb-*`) y scroll horizontal infinito
-- **Búsqueda universal** con acentos normalizados y sin año, agrupada por fuente (PHD→Cuevana→Cinecalidad), filtros por fuente/tipo
+- **Selecciones** = inicio (títulos curados por Kael) + **Explorar** = todo el contenido (secciones: Películas, Series, Estrenos + géneros, con animes separados)
+- Secciones de **Pelispedia** con badge de proveedor (`.sb-pelispedia`) y scroll horizontal infinito
+- **Búsqueda universal** con acentos normalizados, filtros por tipo (Todo/Películas/Series)
 - **Detalle full-screen**: póster, sinopsis, temporadas con pestañas, episodios clicables, compartir (`navigator.share` + deep link `?t=`)
 - **Sheet de fuentes** inferior con tags: `⚡ Sin anuncios` (player propio), `Externa` (va a iframe), `Trailer`, `recomendada`
 - **Mi lista**: Favoritos / Historial (máx 40) / Ver después (`ms_watchlater`)
 - **PWA instalable** + botón "Instalar app" + **pull-to-refresh** en portada
 - Descarga por capítulo cuando el admin la define; capítulos "solo descarga" sin streaming
-- Cards con badge de tipo (Película/Serie/Anime) y badge de fuente con color por proveedor
+- Cards con badge de tipo (Película/Serie/Anime) y badge de fuente
 
-### Reproductor propio (V4.0)
+### Reproductor propio (V4.3)
 - El worker resuelve embed→m3u8/mp4 (`/api/stream`) y el frontend reproduce en `<video>` con hls.js (sin anuncios del proveedor)
-- **Extractores portados de CloudStream** (`STREAM_HOSTS`): Doodstream/playmogo (`/pass_md5`), Byse (AES-GCM), StreamTape (`botlink`) + unpack de packers Dean Edwards + redirects JS + regex genérica
-- **Hosts `STREAM_IFRAME_ONLY`** (ASN-locked / anti-bot → siempre iframe limpio, sin flash roto): vidhidepro, filelions, doodstream (y espejos), minochinos
-- `/api/proxy`: passthrough con UA/Referer/Range + retries x3 backoff + CORS, sin Content-Length
-- Fallback a iframe con toast visible si el player propio falla
+- **Hosts FAST** (player propio): vimeos.net, vimeos.zip, goodstream.one, hlswish.com, uqload.* — `tryNextFastSource` recorre las fuentes FAST al fallar
+- **Fallback**: si ninguna fuente FAST funciona → iframe con toast. Cuevana/minochinos = SOLO iframe
+- `/api/proxy`: passthrough con Range/UA/Referer/retries/CORS, allowlist `STREAM_ALLOWED_HOSTS` (403 fuera de lista, bloquea rangos privados)
+- ⚠️ Los embeds actuales de pelispedia son morencius/hglink/voe (no FAST) → hoy todo cae a iframe con anuncios. Pendiente: extractor morencius con token fresco o proveedor con hosts FAST.
 
 ### Admin (`/admin`, acceso privado — doble tap en avatar)
 - **Catálogo**: busca y agrega/quita items a categorías personalizadas (tabla `movie_metadata`)
@@ -91,12 +87,12 @@ MocchiStream/
 
 | Endpoint | Método | Qué hace |
 |---|---|---|
-| `/api/search?q=&source=&type=` | GET | Búsqueda PHD→Cuevana→Cinecalidad (caché `search/v4`, TTL 300s) |
-| `/api/mainpage?section=&source=&page=` | GET | Portada/secciones (caché `home/v5`, combinadas con dedup) |
+| `/api/search?q=` | GET | Búsqueda en Pelispedia (caché `search/v5`, TTL 300s) |
+| `/api/mainpage?section=&page=` | GET | Portada/secciones (caché `home/v8`) |
 | `/api/details?url=` | GET | Detalle película/serie + episodios + download_links (fusión D1) |
-| `/api/links?url=` | GET | Servidores del embed (filtro de hosts muertos por proveedor) |
-| `/api/stream?url=` | GET | Resuelve embed→m3u8/mp4 para el player propio (fast-fail IFRAME_ONLY) |
-| `/api/proxy?url=&ref=` | GET | Passthrough del stream (Range/UA/Referer/retries/CORS) |
+| `/api/links?url=` | GET | Servidores del embed (embeds paralelos `mapLimit` 4) |
+| `/api/stream?url=` | GET | Resuelve embed→m3u8/mp4 para el player propio (fast-fail IFRAME_ONLY, re-extrae hasta 4x) |
+| `/api/proxy?url=&ref=` | GET | Passthrough del stream (Range/UA/Referer/retries/CORS, allowlist) |
 | `/api/metadata` | GET/POST/DELETE | Categorías personalizadas |
 | `/api/metadata/bycategory?cat=` | GET | Items de una categoría |
 | `/api/categories` | GET | Lista de categorías con conteo |
@@ -104,14 +100,12 @@ MocchiStream/
 | `/api/admin/*` | GET/POST/DELETE | metadata, episodes, stats, cache/purge, category/rename (auth `X-Admin-Password`) |
 
 Todo el bloque de admin exige `X-Admin-Password` (variable `ADMIN_PASSWORD`). 401 verificado.
-Caché con `caches.default` — **SIEMPRE con CORS** en cachePut (lección 08-13). Invalidación de cache al editar metadatos.
+Caché con `caches.default` — **SIEMPRE con CORS** en cachePut. Invalidación de cache al editar metadatos. `/api/details` y `/api/links` TTL 10 min; `/api/stream` TTL 5 min con re-verificación `#EXTM3U` al servir (auto-curación).
 
 ### Proveedores
 | Proveedor | URL | Detalle |
 |---|---|---|
-| PelisplusHD (principal) | `pelisplushd.bz` | Links: `var video=[]` → embed69/xupalace/minochinos/uqload; hosts muertos filtrados |
-| Cuevana (secundario) | `wv3.cuevana3.eu` | Links vía `player.cuevana3.eu/player.php?h=` (rotación) + `data-tr`; hosts vivos = vidhidepro/doodstream (ambos iframe-only) |
-| Cinecalidad (discreta) | `www.cinecalidad.am` | Links vimeos/hlswish/goodstream/uqload (¡player propio!); sin listing de películas |
+| Pelispedia (único) | `pelispedia.mov` (fallback `pelispedia.ink`) | Categoría inferida de la URL (`/anime/`→Anime, `/pelicula/`→Películas, resto→Series). Embeds vía `/vidurl/` (POW difficulty 3 + AES-CBC): hoy morencius/hglink/voe → iframe. Parser de tarjetas tolera `<h2>/<h3>/<h4>` |
 
 ---
 
@@ -120,33 +114,38 @@ Caché con `caches.default` — **SIEMPRE con CORS** en cachePut (lección 08-13
 - `movie_metadata` — categorías personalizadas (external_url, title, custom_category, poster…)
 - `episode_metadata` — PK `(series_url, season, episode)`: name, download_link, is_custom, updated_at
 - `config` — key/value (avatar)
-- `cache_keys` — claves cacheadas para stats/purge (fix `caches.default.keys()`)
+- `cache_keys` — claves cacheadas para stats/purge
 
 ---
 
 ## Deploy
 
 ```bash
-CLOUDFLARE_ACCOUNT_ID=b7ccd04fa7c5cd02effd43406b25e4a7 CLOUDFLARE_API_TOKEN=<token> wrangler pages deploy . --project-name=mocchi-stream
+# Worker
 CLOUDFLARE_ACCOUNT_ID=b7ccd04fa7c5cd02effd43406b25e4a7 CLOUDFLARE_API_TOKEN=<token> wrangler deploy
+
+# Pages — SIEMPRE desde copia limpia SIN worker/ ni wrangler.toml (el código fuente no debe servirse como asset)
+rsync -a --exclude worker --exclude wrangler.toml --exclude .git --exclude .wrangler --exclude docs --exclude README.md --exclude LICENSE . /tmp/opencode/mocchi-pages/
+CLOUDFLARE_ACCOUNT_ID=b7ccd04fa7c5cd02effd43406b25e4a7 CLOUDFLARE_API_TOKEN=<token> wrangler pages deploy /tmp/opencode/mocchi-pages --project-name=mocchi-stream
 ```
 
 Tras deploys repetidos, verificar con cache-bust (`?v=$(date +%s)`) — el CDN sirve HTML viejo por minutos.
 
 ---
 
-## Estado actual (cierre 08-15)
+## Estado actual (cierre 09-13)
 
-- **En producción**: worker V3.6 (`47fb457b`) + Pages `cd1926d3` (sw CACHE `mocchi-v12`, STORAGE_VERSION `v5`)
-- **Player propio funciona para**: vimeos.net, goodstream.one, hlswish.com, uqload.com (badge `⚡ Sin anuncios`)
-- **iframe-only** (ASN-locked/anti-bot): minochinos, vidhidepro, doodstream (+espejos), filelions
-- **Git**: HEAD = `5ab9a73` (backup V3.6). Cambios post-`5ab9a73` SIN commitear — **preguntar a Kael antes de subir**
+- **En producción**: worker V4 (proveedor único Pelispedia, deploys 09-13 `3427de44`/`3a03654f`) + Pages `c2ab2462` (migración a Pelispedia)
+- **Player propio funciona para**: vimeos.net, vimeos.zip, goodstream.one, hlswish.com, uqload.* (badge `⚡ Sin anuncios`)
+- **iframe-only**: morencius, hglink/streamwish, voe, minochinos, vidhidepro, doodstream (+espejos), filelions
+- **Git**: HEAD = `fd956c8` (auditoría 09-11). Cambios post-`fd956c8` SIN commitear (migración Pelispedia + limpieza 09-13) — **preguntar a Kael antes de subir**
 
 ## Lecciones guardadas
 
 - hls.js 1.5+: `xhrSetup(xhr, url)` — la URL es 2º argumento string; `fetchSetup` debe **devolver un `Request`**
-- Tokens de CDN (acek/dramiyos) **ligados al ASN** del que genera el embed → el worker (ASN datacenter 132892) NO puede reproducir minochinos/vidhidepro; mismo problema pendiente = minochinos en browser
+- Tokens de CDN (acek/dramiyos) **ligados al ASN** del que genera el embed → el worker (ASN datacenter) NO puede reproducir minochinos/vidhidepro
 - Packer Dean Edwards: el dict usa `\"` (comillas dobles escapadas) — restaurar backslash simple al desempaquetar
-- goodstream/hlswish CDNs flaky (403/502 transitorios por rate-limit)
-- Playwright-core + chromium-headless-shell en sandbox (`--no-sandbox`) para reproducir bugs de browser
+- morencius (rebrand vidhide): el token `t=` del m3u8 caduca ~1.5h y el embed lo cachea → player propio solo viable con re-extracción de token fresco
+- hglink/streamwish: ofuscador custom que exige navegador completo (fingerprint/cookies) → imposible en Workers
+- voe.sx: anti-bot Altcha (PBKDF2 cost 10000) → requiere extractor dedicado, caro e inestable
 - Verificar con `curl -H "Origin: https://<site>.pages.dev"` los endpoints cacheados

@@ -2,7 +2,7 @@
 
 Reproductor y catálogo de streaming personal, **sin anuncios**, con portada curada, búsqueda universal y panel de administración privado.
 
-MocchiStream agrega contenido de varios proveedores, combina los resultados en una sola interfaz y reproduce los episodios en un **reproductor propio** (HLS directo) sin los anuncios de las fuentes originales. Cuando una fuente no se puede resolver, cae a un iframe limpio.
+MocchiStream agrega contenido de **Pelispedia** (proveedor único), lo organiza en una sola interfaz y reproduce los episodios en un **reproductor propio** (HLS directo) sin los anuncios de las fuentes originales. Cuando una fuente no se puede resolver, cae a un iframe limpio.
 
 - **Producción**: https://mocchi-stream.pages.dev
 - **API**: `mocchistream.kael-iv22.workers.dev`
@@ -14,8 +14,8 @@ MocchiStream agrega contenido de varios proveedores, combina los resultados en u
 ## Características
 
 - **Portada (Selecciones)** con títulos curados y **Explorar** con 9 secciones (Películas, Series, Estrenos y 6 géneros, con animes separados).
-- **Secciones combinadas** de varias fuentes con deduplicación por título y badge de proveedor.
-- **Búsqueda universal** con acentos normalizados, agrupada por fuente y con filtros por tipo.
+- **Secciones de Pelispedia** con deduplicación por título y badge de proveedor.
+- **Búsqueda universal** con acentos normalizados y filtros por tipo.
 - **Reproductor propio sin anuncios** para las fuentes compatibles (HLS vía worker) con fallback a iframe.
 - **Detalle full-screen**: póster, sinopsis, temporadas con pestañas, episodios clicables y compartir.
 - **Mi lista**: Favoritos, Historial (máx. 40) y Ver después.
@@ -87,8 +87,8 @@ La configuración del worker (binding D1, secretos) vive en `wrangler.toml`. La 
 
 | Endpoint | Qué hace |
 |---|---|
-| `/api/search?q=&source=&type=` | Búsqueda en las fuentes configuradas |
-| `/api/mainpage?section=&source=&page=` | Portada y secciones combinadas |
+| `/api/search?q=` | Búsqueda en Pelispedia |
+| `/api/mainpage?section=&page=` | Portada y secciones |
 | `/api/details?url=` | Detalle + episodios + enlaces de descarga |
 | `/api/links?url=` | Servidores del embed disponibles |
 | `/api/stream?url=` | Resuelve embed → m3u8/mp4 para el reproductor propio |

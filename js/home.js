@@ -4,12 +4,9 @@ import { openDetailFromUrl } from './detail.js';
 
 export function sectionSourceBadge(sec) {
   const sources = [...new Set((sec.items || []).map(it => it.source).filter(Boolean))];
-  if (sources.length > 1) return { label: sources.join(' + '), cls: 'mix' };
   const first = sources[0];
-  if (first) return { label: first, cls: (first || '').toLowerCase() };
-  const slug = sec.slug || '';
-  if (slug === 'peliculas-phd' || slug === 'series-phd') return { label: 'PelisplusHD', cls: 'pelisplushd' };
-  return { label: 'Cuevana', cls: 'cuevana' };
+  if (first) return { label: first, cls: first.toLowerCase() };
+  return { label: 'Pelispedia', cls: 'pelispedia' };
 }
 
 export function loadHome() {

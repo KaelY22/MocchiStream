@@ -6,10 +6,10 @@ let watchLater = [];
 let detailFavUpdater = null;
 let listChangeListener = null;
 
-const STALE_RE = /cinecalidad/i;
+const KEEP_RE = /pelispedia\./i;
 
 function cleanStale(list) {
-  return (list || []).filter(i => !STALE_RE.test(i.url || '') && !STALE_RE.test(i.source || ''));
+  return (list || []).filter(i => KEEP_RE.test(i.url || ''));
 }
 
 export function loadLists() {

@@ -303,13 +303,7 @@ button { font-family: inherit; }
   border-radius: var(--radius-full);
   letter-spacing: 0.02em;
 }
-.src-badge.sb-cuevana { background: rgba(251, 191, 36, 0.9); color: #331d02; }
-.src-badge.sb-pelisplushd { background: rgba(var(--violet-rgb), 0.9); color: #150a2e; }
-.src-badge.sb-cinecalidad { background: rgba(45, 212, 191, 0.9); color: #04211d; }
-.src-badge.sb-mix {
-  background: linear-gradient(90deg, rgba(var(--violet-rgb), 0.95), rgba(251, 191, 36, 0.95));
-  color: #fff;
-}
+.src-badge.sb-pelispedia { background: rgba(var(--violet-rgb), 0.9); color: #150a2e; }
 
 .card-progress {
   position: absolute; left: 0; right: 0; bottom: 0;
@@ -1542,31 +1536,6 @@ button { font-family: inherit; }
   text-transform: uppercase;
 }
 
-/* ===== Grupos por fuente en búsqueda ===== */
-.search-group { margin-bottom: 1.3rem; }
-.search-group-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.7rem;
-}
-.group-src-badge {
-  display: inline-block;
-  padding: 0.2rem 0.7rem;
-  font-size: 0.68rem; font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  border-radius: var(--radius-full);
-}
-.group-src-badge.sb-cuevana { background: rgba(251, 191, 36, 0.9); color: #331d02; }
-.group-src-badge.sb-pelisplushd { background: rgba(var(--violet-rgb), 0.9); color: #150a2e; }
-.group-src-badge.sb-cinecalidad { background: rgba(45, 212, 191, 0.9); color: #04211d; }
-.group-src-badge.sb-mix {
-  background: linear-gradient(90deg, rgba(var(--violet-rgb), 0.95), rgba(251, 191, 36, 0.95));
-  color: #fff;
-}
-.group-count { font-size: 0.72rem; color: var(--label-3); font-weight: 600; }
-
 /* ===== Etiqueta de fuente en títulos de sección ===== */
 .section-src-badge {
   display: inline-block;
@@ -1578,13 +1547,7 @@ button { font-family: inherit; }
   border-radius: var(--radius-full);
   vertical-align: middle;
 }
-.section-src-badge.sb-cuevana { background: rgba(251, 191, 36, 0.9); color: #331d02; }
-.section-src-badge.sb-pelisplushd { background: rgba(var(--violet-rgb), 0.9); color: #150a2e; }
-.section-src-badge.sb-cinecalidad { background: rgba(45, 212, 191, 0.9); color: #04211d; }
-.section-src-badge.sb-mix {
-  background: linear-gradient(90deg, rgba(var(--violet-rgb), 0.95), rgba(251, 191, 36, 0.95));
-  color: #fff;
-}
+.section-src-badge.sb-pelispedia { background: rgba(var(--violet-rgb), 0.9); color: #150a2e; }
 
 /* ============ ACCESSIBILIDAD: REDUCED MOTION / TRANSPARENCY ============ */
 @media (prefers-reduced-motion: reduce) {
