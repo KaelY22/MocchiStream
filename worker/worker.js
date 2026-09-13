@@ -1,22 +1,28 @@
-// worker.js - MocchiStream (Pelispedia) - V4
+// worker.js - MocchiStream V5 (Catálogo TMDB + reproducción on-demand)
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const PELISPEDIA_URL = 'https://pelispedia.mov';
-const PELISPEDIA_FALLBACK = 'https://pelispedia.ink';
-const CACHE_SEARCH_TTL = 300;
-const CACHE_MAIN_TTL = 300;
-const D1_CHUNK = 80;
 const CACHE_HOST = 'https://mocchi-cache.internal';
+const TMDB_KEY = 'e6333b32409e02a4a6eba6fb7ff866bb';
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const NETFLIX_PROVIDER = '8';
+const NETFLIX_NETWORK = '213';
+const WATCH_REGION = 'MX';
+const MIN_VOTES = 50;
+const STREAM_TIMEOUT = 12000;
 
 const GENRE_SECTIONS = [
-  ['accion', 'Acción'],
-  ['terror', 'Terror'],
-  ['animacion', 'Animación'],
-  ['ciencia-ficcion', 'Ciencia ficción'],
-  ['comedia', 'Comedia'],
-  ['romance', 'Romance'],
-  ['drama', 'Drama'],
-  ['aventura', 'Aventura'],
+  ['accion', 'Acción', 28], ['drama', 'Drama', 18], ['comedia', 'Comedia', 35],
+  ['thriller', 'Thriller', 53], ['misterio', 'Misterio', 9648], ['scifi', 'Ciencia ficción', 878],
+  ['fantasia', 'Fantasía', 14], ['horror', 'Horror', 27], ['documental', 'Documentales', 99],
+  ['animacion', 'Animación', 16], ['aventura', 'Aventura', 12], ['romance', 'Romance', 10749],
+];
+
+const HOME_SECTIONS = [
+  ['top10global', 'Top 10 Global'], ['top10mexico', 'Top 10 México'],
+  ['popular', 'Netflix Popular'], ['top', 'Mejor Calificadas'],
+  ['nuevos', 'Estrenos'], ['originales', 'Netflix Originales'],
+  ['kdrama', 'K-Drama'], ['anime', 'Anime'],
 ];
 
 export default {
@@ -24,68 +30,43 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
+    const key = env.TMDB_KEY || TMDB_KEY;
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password'
     };
 
-    if (method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
-    }
-
-    if (path === '/api/search' && method === 'GET') {
-      const query = url.searchParams.get('q');
-      const page = parseInt(url.searchParams.get('page')) || 1;
-      if (!query) return jsonResponse({ error: 'Missing query' }, corsHeaders, 400);
-      return handleSearch(query, page, env, corsHeaders, url.searchParams.get('source') || '');
-    }
+    if (method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
     if (path === '/api/mainpage' && method === 'GET') {
-      return handleMainPage(url, env, corsHeaders);
+      return handleMainPage(url, env, corsHeaders, key);
     }
-
+    if (path === '/api/search' && method === 'GET') {
+      const q = url.searchParams.get('q');
+      if (!q) return jsonResponse({ error: 'Missing query' }, corsHeaders, 400);
+      return handleSearch(q, env, corsHeaders, key);
+    }
     if (path === '/api/details' && method === 'GET') {
-      const targetUrl = url.searchParams.get('url');
-      if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-      return handleDetails(targetUrl, corsHeaders, env);
+      const id = url.searchParams.get('id');
+      const type = url.searchParams.get('type') === 'tv' ? 'tv' : 'movie';
+      if (!id) return jsonResponse({ error: 'Missing id' }, corsHeaders, 400);
+      return handleDetails(id, type, env, corsHeaders, key);
     }
-
-    if (path === '/api/links' && method === 'GET') {
-      const targetUrl = url.searchParams.get('url');
-      if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-      return handleLinks(targetUrl, corsHeaders, env);
+    if (path === '/api/play' && method === 'GET') {
+      return handlePlay(url, env, corsHeaders);
     }
-
     if (path === '/api/stream' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
       return handleStreamResolve(targetUrl, corsHeaders, env);
     }
-
     if (path === '/api/proxy' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
       return handleProxy(targetUrl, url, request, corsHeaders);
     }
-
-    if (path === '/api/metadata' && method === 'GET') {
-      const externalUrl = url.searchParams.get('url');
-      if (!externalUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-      return handleGetMetadata(externalUrl, env, corsHeaders);
-    }
-
-    if (path === '/api/metadata/bycategory' && method === 'GET') {
-      const category = url.searchParams.get('cat');
-      if (!category) return jsonResponse({ error: 'Missing category' }, corsHeaders, 400);
-      return handleGetByCategory(category, env, corsHeaders);
-    }
-
-    if (path === '/api/categories' && method === 'GET') {
-      return handleGetCategories(env, corsHeaders);
-    }
-
     if (path === '/api/avatar' && method === 'GET') {
       return handleGetAvatar(env, corsHeaders);
     }
@@ -99,42 +80,16 @@ export default {
         }
         return jsonResponse({ error: 'Unauthorized' }, corsHeaders, 401);
       }
-
-      if (path === '/api/admin/metadata' && method === 'POST') {
-        return handleSaveMetadata(request, env, corsHeaders);
-      }
-      if (path === '/api/admin/metadata' && method === 'DELETE') {
-        const externalUrl = url.searchParams.get('url');
-        if (!externalUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-        return handleDeleteMetadata(externalUrl, env, corsHeaders);
-      }
-      if (path === '/api/admin/metadata/all' && method === 'GET') {
-        return handleGetAllMetadata(env, corsHeaders);
-      }
-      if (path === '/api/admin/episodes' && method === 'GET') {
-        const seriesUrl = url.searchParams.get('url');
-        if (!seriesUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
-        return handleListEpisodes(seriesUrl, env, corsHeaders);
-      }
-      if (path === '/api/admin/episodes' && method === 'POST') {
-        return handleUpsertEpisode(request, env, corsHeaders);
-      }
-      if (path === '/api/admin/episodes' && method === 'DELETE') {
-        return handleDeleteEpisode(url, env, corsHeaders);
-      }
-      if (path === '/api/admin/avatar') {
-        if (method === 'GET') return handleGetAvatar(env, corsHeaders);
-        if (method === 'POST') return handleUpdateAvatar(request, env, corsHeaders);
-        if (method === 'DELETE') return handleDeleteAvatar(env, corsHeaders);
-      }
       if (path === '/api/admin/stats' && method === 'GET') {
         return handleAdminStats(env, corsHeaders);
       }
       if (path === '/api/admin/cache/purge' && method === 'POST') {
         return handleCachePurge(request, env, corsHeaders);
       }
-      if (path === '/api/admin/category/rename' && method === 'POST') {
-        return handleCategoryRename(request, env, corsHeaders);
+      if (path === '/api/admin/avatar') {
+        if (method === 'GET') return handleGetAvatar(env, corsHeaders);
+        if (method === 'POST') return handleUpdateAvatar(request, env, corsHeaders);
+        if (method === 'DELETE') return handleDeleteAvatar(env, corsHeaders);
       }
     }
 
@@ -152,19 +107,24 @@ function jsonResponse(data, corsHeaders, status = 200) {
 
 const PRIVATE_HOST_RE = /(?:^|\.)(?:local|internal|localhost|lan)$|^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d)\.|0\.)/i;
 
-const PROVIDER_ALLOWED_HOSTS = ['pelispedia.mov', 'pelispedia.ink'];
-
 const STREAM_ALLOWED_HOSTS = [
-  'vimeos.net', 'vimeos.zip', 'goodstream.one', 'hlswish.com', 'uqload.*', 'vidhidepro.com', 'morencius.com',
-  'streamwish.to', 'filemoon.sx', 'watchsb.com', 'lulustream.com', 'dood.la', 'doodstream.com',
-  'dooood.com', 'doods.pro', 'd0000d.com', 'd000d.com', 'ds2play.com', 'ds2video.com',
-  'myvidplay.com', 'playmogo.com', 'dood.video', 'byse.com', 'byse.sx', 'streamtape.com',
-  'streamtape.net', 'streamtape.xyz', 'watchadsontape.com', 'shavetape.cash', 'vide0.net',
-  'minochinos.com', 'acek-cdn.com', 'dramiyos-cdn.com', 'cloudatacdn.com', 'filelions.live',
-  'filelions.online', 'filelions.to', 'embed69.org', 'xupalace.org', 'hglink.to',
-  'premilkyway.com', 'savefiles.com', 'mwish.pro', 'dwish.pro', 'embedwish.com', 'wishembed.pro',
-  'kswplayer.info', 'wishfast.top', 'streamwish.site', 'sfastwish.com', 'strwish.xyz', 'voe.sx',
-  'pelispedia.mov', 'pelispedia.ink'
+  'vimeos.net', 'vimeos.zip', 'goodstream.one', 'hlswish.com', 'uqload.*', 'fastream.to',
+  'doodstream.com', 'dooood.com', 'doods.pro', 'dood.la', 'd0000d.com', 'd000d.com',
+  'ds2play.com', 'ds2video.com', 'myvidplay.com', 'playmogo.com', 'dood.video',
+  'byse.com', 'byse.sx', 'streamtape.com', 'streamtape.net', 'streamtape.xyz',
+  'watchadsontape.com', 'shavetape.cash', 'vide0.net', 'filelions.live', 'filelions.online',
+  'filelions.to', 'embed69.org', 'xupalace.org', 'hglink.to', 'premilkyway.com',
+  'savefiles.com', 'mwish.pro', 'dwish.pro', 'embedwish.com', 'wishembed.pro',
+  'kswplayer.info', 'wishfast.top', 'streamwish.site', 'sfastwish.com', 'strwish.xyz',
+  'voe.sx', 'videoapp.zip', 'vidhidepro.com', 'morencius.com', 'minochinos.com',
+  'acek-cdn.com', 'dramiyos-cdn.com', 'cloudatacdn.com', 'pelispedia.is', 'pelispedia.mov',
+  'cinecalidad.am', 'cinecalidad.ec', 'cinecalidad.run', 'seriesmetro.net', 'monoschinos.st',
+  'latanime.org', 'ok.ru', 'mp4upload.com',
+];
+
+const SITE_ALLOWED_HOSTS = [
+  'cinecalidad.am', 'cinecalidad.ec', 'cinecalidad.run', 'pelispedia.is', 'pelispedia.mov',
+  'pelispedia.ink', 'seriesmetro.net', 'monoschinos.st', 'latanime.org',
 ];
 
 function hostAllowed(host, suffixes) {
@@ -249,26 +209,12 @@ async function cachePut(key, data, ttl, corsHeaders, env) {
   return res;
 }
 
-async function invalidateMainPage(env) {
-  await caches.default.delete(new Request(`${CACHE_HOST}/home/v8`));
-  if (env && env.DB) {
-    await env.DB.prepare("DELETE FROM cache_keys WHERE key = 'home/v8'").run().catch(() => {});
-  }
-}
-
-async function invalidateDetails(url, env) {
-  const key = 'details/v1/' + encodeURIComponent(url);
-  await caches.default.delete(new Request(CACHE_HOST + '/' + key));
-  if (env && env.DB) {
-    await env.DB.prepare('DELETE FROM cache_keys WHERE key = ?').bind(key).run().catch(() => {});
-  }
-}
-
 function normTitle(t) {
   return String(t || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[:;,.!?()\-_]/g, ' ')
     .replace(/\s*\((?:19|20)\d{2}\)\s*/g, ' ')
     .replace(/\b(?:19|20)\d{2}\b/g, ' ')
     .replace(/\s+/g, ' ')
@@ -287,568 +233,528 @@ function decodeEntities(str) {
     .replace(/&#0*160;|&nbsp;/g, ' ');
 }
 
-// ==================== SCRAPER PELISPEDIA ====================
-function normalizePelispediaUrl(u) {
-  return String(u).replace(PELISPEDIA_FALLBACK, PELISPEDIA_URL);
+// ==================== TMDB ====================
+async function tmdbGet(path, params, env, key, ttl = 86400) {
+  const qs = new URLSearchParams({ api_key: key, language: 'es-MX', ...params }).toString();
+  const cacheKey = 'tmdb/' + path + '?' + qs;
+  const hit = await cacheGet(cacheKey);
+  if (hit) return hit.json();
+  const res = await fetch(`${TMDB_BASE}${path}?${qs}`);
+  if (!res.ok) throw new Error(`TMDB ${res.status}`);
+  const data = await res.json();
+  return cachePut(cacheKey, data, ttl, {}, env).then(r => data);
 }
 
-async function pelispediaFetch(pathOrUrl, timeout = 8000) {
-  const base = new URL(pathOrUrl, PELISPEDIA_URL).href;
-  const fallback = base.replace(PELISPEDIA_URL, PELISPEDIA_FALLBACK);
-  try {
-    return await fetchHTML(base, timeout);
-  } catch (e) {
-    if (fallback === base) throw e;
-    return await fetchHTML(fallback, timeout);
+function imgUrl(p, size) {
+  return p ? `${TMDB_IMG}/${size}${p}` : null;
+}
+
+function toItem(r, netflix = true) {
+  const isTv = r.media_type === 'tv' || r.name != null || r.first_air_date != null;
+  const title = r.title || r.name || r.original_title || r.original_name || '';
+  if (!title || !r.id) return null;
+  return {
+    id: r.id,
+    type: isTv ? 'tv' : 'movie',
+    title,
+    year: parseInt((r.release_date || r.first_air_date || '').slice(0, 4)) || null,
+    poster: imgUrl(r.poster_path, 'w342'),
+    backdrop: imgUrl(r.backdrop_path, 'w780'),
+    score: r.vote_average ? Math.round(r.vote_average * 10) / 10 : null,
+    netflix,
+  };
+}
+
+async function discover(path, page, params, env, key) {
+  const data = await tmdbGet(`/discover/${path}`, {
+    page: String(page),
+    sort_by: 'popularity.desc',
+    with_watch_providers: NETFLIX_PROVIDER,
+    watch_region: WATCH_REGION,
+    vote_count: { movie: String(MIN_VOTES), tv: '20' }[path],
+    ...params,
+  }, env, key);
+  return (data.results || []).map(r => toItem(r, true)).filter(Boolean);
+}
+
+async function fetchTop10(url, env, key) {
+  const html = await fetchHTML(url, 10000);
+  const titles = [...html.matchAll(/data-uia="top10-table-row-title"[^>]*>([\s\S]*?)<\/button>/gi)]
+    .map(m => m[1].replace(/<[^>]*>/g, '').trim())
+    .filter(Boolean);
+  const items = [];
+  for (const t of titles.slice(0, 10)) {
+    try {
+      const data = await tmdbGet('/search/multi', { query: t }, env, key, 3600);
+      const first = (data.results || []).find(r => r.media_type === 'movie' || r.media_type === 'tv');
+      if (first) items.push(toItem(first, true));
+    } catch (e) {}
+  }
+  return items;
+}
+
+async function homeSection(slug, page, env, key) {
+  const now = new Date().getFullYear();
+  switch (slug) {
+    case 'top10global':
+      return fetchTop10('https://www.netflix.com/tudum/top10', env, key);
+    case 'top10mexico':
+      return fetchTop10('https://www.netflix.com/tudum/top10/mexico', env, key);
+    case 'popular':
+      return discover('movie', page, {}, env, key).then(m => discover('tv', page, {}, env, key).then(t => m.concat(t)));
+    case 'top':
+      return Promise.all([
+        discover('movie', page, { sort_by: 'vote_average.desc', vote_count: '200' }, env, key),
+        discover('tv', page, { sort_by: 'vote_average.desc', vote_count: '100' }, env, key),
+      ]).then(([m, t]) => m.concat(t));
+    case 'nuevos':
+      return Promise.all([
+        discover('movie', page, { sort_by: 'primary_release_date.desc', 'primary_release_date.gte': `${now}-01-01` }, env, key),
+        discover('tv', page, { sort_by: 'first_air_date.desc', 'first_air_date.gte': `${now}-01-01` }, env, key),
+      ]).then(([m, t]) => m.concat(t));
+    case 'originales':
+      return discover('tv', page, { with_networks: NETFLIX_NETWORK }, env, key);
+    case 'kdrama':
+      return discover('tv', page, { with_original_language: 'ko' }, env, key);
+    case 'anime':
+      return discover('tv', page, { with_genres: '16', with_original_language: 'ja' }, env, key);
+    default: {
+      const g = GENRE_SECTIONS.find(([s]) => s === slug.replace('genero-', ''));
+      if (!g) return [];
+      return Promise.all([
+        discover('movie', page, { with_genres: String(g[2]) }, env, key),
+        discover('tv', page, { with_genres: String(g[2]) }, env, key),
+      ]).then(([m, t]) => m.concat(t));
+    }
   }
 }
 
-function extractPelispediaItems(html) {
+async function handleMainPage(url, env, corsHeaders, key) {
+  const section = url.searchParams.get('section') || '';
+  const page = Math.max(1, parseInt(url.searchParams.get('page')) || 1);
+
+  if (section) {
+    const cacheKey = `home/v9/${section}/${page}`;
+    const hit = await cacheGet(cacheKey);
+    if (hit) return hit;
+    try {
+      const items = await homeSection(section, page, env, key);
+      return cachePut(cacheKey, items, 86400, corsHeaders, env);
+    } catch (e) {
+      return jsonResponse([], corsHeaders);
+    }
+  }
+
+  const cacheKey = 'home/v9';
+  const hit = await cacheGet(cacheKey);
+  if (hit) return hit;
+
+  const sections = [];
+  const seen = new Set();
+  const results = await Promise.allSettled(
+    [...HOME_SECTIONS, ...GENRE_SECTIONS.map(([s, t]) => ['genero-' + s, t])]
+      .map(async ([slug, title]) => {
+        try {
+          const items = await homeSection(slug, 1, env, key);
+          return { slug, title, items: items.filter(it => {
+            const k = it.type + '|' + it.id;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          }) };
+        } catch (e) {
+          return { slug, title, items: [] };
+        }
+      })
+  );
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.items.length) sections.push(r.value);
+  }
+  return cachePut(cacheKey, { sections }, 86400, corsHeaders, env);
+}
+
+async function handleSearch(query, env, corsHeaders, key) {
+  const cacheKey = 'search/v6/' + encodeURIComponent(query.trim().toLowerCase());
+  const hit = await cacheGet(cacheKey);
+  if (hit) return hit;
+  try {
+    const [movies, series] = await Promise.all([
+      tmdbGet('/search/movie', { query }, env, key, 3600),
+      tmdbGet('/search/tv', { query }, env, key, 3600),
+    ]);
+    const seen = new Set();
+    const items = [];
+    for (const r of [...(movies.results || []), ...(series.results || [])]) {
+      const it = toItem(r, false);
+      if (!it) continue;
+      const k = it.type + '|' + it.id;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      items.push(it);
+    }
+    items.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    return cachePut(cacheKey, items, 3600, corsHeaders, env);
+  } catch (e) {
+    return jsonResponse([], corsHeaders);
+  }
+}
+
+async function handleDetails(id, type, env, corsHeaders, key) {
+  const cacheKey = `details/v2/${type}/${id}`;
+  const hit = await cacheGet(cacheKey);
+  if (hit) return hit;
+  try {
+    const d = await tmdbGet(`/${type}/${id}`, { append_to_response: 'external_ids' }, env, key, 604800);
+    const item = {
+      id: d.id,
+      type,
+      title: d.title || d.name || '',
+      year: parseInt((d.release_date || d.first_air_date || '').slice(0, 4)) || null,
+      overview: d.overview || '',
+      poster: imgUrl(d.poster_path, 'w500'),
+      backdrop: imgUrl(d.backdrop_path, 'w780'),
+      score: d.vote_average ? Math.round(d.vote_average * 10) / 10 : null,
+      genres: (d.genres || []).map(g => g.name),
+      runtime: d.runtime || null,
+      netflix: true,
+      imdb: d.external_ids && d.external_ids.imdb_id || null,
+      anime: type === 'tv' && d.original_language === 'ja' && (d.genres || []).some(g => g.id === 16),
+    };
+    if (type === 'tv') {
+      const seasonsCount = d.number_of_seasons || 0;
+      const eps = [];
+      await mapLimit(Array.from({ length: seasonsCount }, (_, i) => i + 1), 4, async s => {
+        try {
+          const sd = await tmdbGet(`/tv/${id}/season/${s}`, {}, env, key, 604800);
+          for (const e of sd.episodes || []) {
+            eps.push({
+              name: e.name || `Capítulo ${e.episode_number}`,
+              season: s,
+              episode: e.episode_number,
+              still: imgUrl(e.still_path, 'w300'),
+            });
+          }
+        } catch (e) {}
+      });
+      item.episodes = eps.sort((a, b) => a.season - b.season || a.episode - b.episode);
+    }
+    return cachePut(cacheKey, item, 604800, corsHeaders, env);
+  } catch (e) {
+    return jsonResponse({ error: e.message }, corsHeaders, 500);
+  }
+}
+
+// ==================== REPRODUCCIÓN ON-DEMAND ====================
+const FAST_PRIORITY = [
+  /vimeos\.(?:net|zip)/i, /goodstream\.one/i, /fastream\.to/i, /hlswish\.com/i,
+  /doodstream\.com|dooood\.com|doods\.pro|dood\.la|d0000d\.com|d000d\.com/i,
+  /uqload\.[a-z]+/i,
+];
+
+function fastRank(u) {
+  for (let i = 0; i < FAST_PRIORITY.length; i++) {
+    if (FAST_PRIORITY[i].test(u)) return i;
+  }
+  return -1;
+}
+
+function sortEmbeds(embeds) {
+  return embeds.slice().sort((a, b) => {
+    const ra = fastRank(a), rb = fastRank(b);
+    if (ra === -1 && rb === -1) return 0;
+    if (ra === -1) return 1;
+    if (rb === -1) return -1;
+    return ra - rb;
+  });
+}
+
+function extractCinecalidadItems(html) {
   const items = [];
-  const cardRegex = /<a[^>]*href="([^"]*)"[^>]*class="[^"]*block h-full[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  const re = /<article[^>]*class="[^"]*item movies[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
   let m;
-  while ((m = cardRegex.exec(html)) !== null) {
-    const url = m[1];
-    if (!url.includes('pelispedia.') && !url.startsWith('/')) continue;
-    const imgMatch = m[2].match(/<img[^>]*src="([^"]*)"/i);
-    const titleMatch = m[2].match(/<h[234][^>]*>([\s\S]*?)<\/h[234]>/i);
-    if (!titleMatch) continue;
-    const title = decodeEntities(titleMatch[1].replace(/<[^>]*>/g, '')).trim();
+  while ((m = re.exec(html)) !== null) {
+    const block = m[1];
+    const href = block.match(/<a[^>]*href="([^"]*\/ver-(?:pelicula|serie)\/[^"]*)"/i);
+    if (!href) continue;
+    const title = block.match(/class="in_title"[^>]*>\s*([^<]+)</i);
     if (!title) continue;
-    const category = /\/anime\//.test(url) ? 'Anime' : /\/pelicula\//.test(url) ? 'Películas' : 'Series';
+    const year = block.match(/<p>(\d{4})<\/p>/);
+    const type = /\/ver-serie\//.test(href[1]) ? 'tv' : 'movie';
     items.push({
-      title,
-      url: normalizePelispediaUrl(url),
-      poster: imgMatch ? imgMatch[1] : null,
-      category,
-      source: 'Pelispedia',
-      external: true,
+      title: decodeEntities(title[1]).trim(),
+      url: href[1],
+      type,
+      year: year ? parseInt(year[1]) : null,
     });
   }
   return items;
 }
 
-async function getPelispediaDetails(targetUrl) {
-  const html = await pelispediaFetch(targetUrl);
-  const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  let title = h1Match ? decodeEntities(h1Match[1].replace(/<[^>]*>/g, '')).trim() : 'Sin título';
-  const yearMatch = title.match(/\((\d{4})\)/);
-  const year = yearMatch ? yearMatch[1] : null;
-  title = title.replace(/\s*\(\d{4}\)\s*$/, '');
-  const descMatch = html.match(/<meta[^>]*name="description"[^>]*content="([^"]*)"/i);
-  const description = descMatch ? decodeEntities(descMatch[1]).trim() : '';
-  let poster = null;
-  const ogMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
-  if (ogMatch) poster = ogMatch[1];
-  const vidMatch = html.match(/<iframe[^>]*src="([^"]*\/vidurl\/[^"]*)"/i);
-  const vidPath = vidMatch ? vidMatch[1] : '';
-  const imdbMatch = vidPath.match(/tt\d+/i);
-  const imdb = imdbMatch ? imdbMatch[0] : null;
-
-  const isMovie = /\/pelicula\//.test(targetUrl);
-  if (isMovie) {
-    return { type: 'movie', title, description, poster, url: targetUrl, external: true, source: 'Pelispedia', year, imdb };
-  }
-
-  const episodes = [];
-  const epRegex = /<a[^>]*href="([^"]*\/temporada\/(\d+)\/capitulo\/(\d+))"[^>]*>([\s\S]*?)<\/a>/gi;
-  let epMatch;
-  while ((epMatch = epRegex.exec(html)) !== null) {
-    let name = epMatch[4].replace(/<[^>]*>/g, '').trim();
-    name = name.replace(/^E\d+\s*:\s*|^E\d+\s+/i, '').trim();
-    episodes.push({
-      name: decodeEntities(name) || 'Episodio ' + epMatch[3],
-      link: normalizePelispediaUrl(epMatch[1].startsWith('/') ? PELISPEDIA_URL + epMatch[1] : epMatch[1]),
-      season: parseInt(epMatch[2]),
-      episode: parseInt(epMatch[3]),
-      poster: null,
-    });
-  }
-  return { type: 'series', title, description, poster, episodes, url: targetUrl, external: true, source: 'Pelispedia', year, imdb };
+function cinecalidadEmbeds(html) {
+  return [...html.matchAll(/data-option="([^"]+)"/gi)]
+    .map(m => decodeEntities(m[1]))
+    .filter(u => /^https?:/.test(u));
 }
 
-async function getPelispediaLinks(targetUrl) {
-  const html = await pelispediaFetch(targetUrl);
-  const vidMatch = html.match(/<iframe[^>]*src="([^"]*\/vidurl\/[^"]*)"/i);
-  if (!vidMatch) return [];
-  const vidUrl = vidMatch[1].startsWith('/') ? PELISPEDIA_URL + vidMatch[1] : vidMatch[1];
-  try {
-    return await extractEmbed69(vidUrl);
-  } catch (e) {
-    return [];
-  }
-}
-
-async function deriveAesKey(challenge, difficulty, salt) {
-  const prefix = '0'.repeat(difficulty);
-  let nonce = 0;
-  while (true) {
-    const hashHex = await sha256Hex(challenge + nonce);
-    if (hashHex.startsWith(prefix)) {
-      return sha256Bytes(challenge + nonce + salt);
-    }
-    nonce++;
-  }
-}
-
-async function sha256Hex(input) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function sha256Bytes(input) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return new Uint8Array(buf);
-}
-
-async function decryptAES(encryptedBase64, aesKey) {
-  const raw = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
-  const iv = raw.slice(0, 16);
-  const data = raw.slice(16);
-  const key = await crypto.subtle.importKey('raw', aesKey.slice(0, 32), { name: 'AES-CBC' }, false, ['decrypt']);
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, data);
-  return new TextDecoder().decode(decrypted);
-}
-
-async function extractEmbed69(url) {
-  const html = await fetchHTML(url);
-  const scriptMatch = html.match(/dataLink\s*=\s*(\[[\s\S]*?\]);/);
-  const powMatch = html.match(/const POW_CHALLENGE = '([^']*)'/);
-  const diffMatch = html.match(/const POW_DIFFICULTY = (\d+)/);
-  const saltMatch = html.match(/const POW_SALT = '([^']*)'/);
-  if (!scriptMatch || !powMatch || !diffMatch || !saltMatch) return [];
-  let parsed;
-  try {
-    parsed = JSON.parse(scriptMatch[1]);
-  } catch (e) {
-    return [];
-  }
-  const aesKey = await deriveAesKey(powMatch[1], parseInt(diffMatch[1]), saltMatch[1]);
+function cinecalidadEpisodeLinks(html) {
   const links = [];
-  for (const lang of parsed) {
-    for (const server of lang.sortedEmbeds || []) {
-      if (!server.link) continue;
-      try {
-        const decrypted = await decryptAES(server.link, aesKey);
-        if (decrypted && !links.includes(decrypted)) links.push(decrypted);
-      } catch (e) {}
-    }
+  const re = /href="([^"]*\/ver-el-episodio\/([^"]*?)-(\d+)x(\d+)\/?)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    links.push({ url: m[1], season: parseInt(m[3]), episode: parseInt(m[4]) });
   }
   return links;
 }
 
-// ==================== MANEJADORES ====================
-
-function dedupItems(arr) {
-  const seen = new Set();
-  const out = [];
-  for (const it of arr) {
-    const keyTitle = (it.title || '').toLowerCase().trim();
-    if (!keyTitle || seen.has(keyTitle)) continue;
-    seen.add(keyTitle);
-    out.push(it);
-  }
-  return out;
-}
-
-async function handleMainPage(url, env, corsHeaders) {
-  const section = url.searchParams.get('section') || '';
-  const source = url.searchParams.get('source') || '';
-  const page = Math.max(1, parseInt(url.searchParams.get('page')) || 1);
-  const sourceKey = source ? '/' + source.toLowerCase() : '';
-  const filterBySource = arr => (source ? arr.filter(it => (it.source || '') === source) : arr);
-
-  const fetchSection = async (path) => {
-    try {
-      const html = await pelispediaFetch(`${PELISPEDIA_URL}${path}`);
-      return dedupItems(extractPelispediaItems(html));
-    } catch (e) {
-      return [];
-    }
-  };
-
-  if (section) {
-    const key = `home/v8/${section}/${page}${sourceKey}`;
-    const hit = await cacheGet(key);
-    if (hit) return hit;
-    let items = [];
-    if (section === 'peliculas') {
-      items = await fetchSection(`/peliculas?page=${page}`);
-    } else if (section === 'series') {
-      items = await fetchSection(`/series?page=${page}`);
-    } else if (section === 'anime') {
-      items = await fetchSection(`/animes?page=${page}`);
-    } else if (section === 'estrenos') {
-      items = await fetchSection(`/peliculas?page=${page}`);
-    } else if (section.startsWith('genero-')) {
-      const genre = section.slice('genero-'.length);
-      items = await fetchSection(`/generos/${genre}?page=${page}`);
-    }
-    items = filterBySource(items);
-    if (!items.length) return jsonResponse([], corsHeaders);
-    const enriched = await enrichItems(items, env);
-    return cachePut(key, enriched, CACHE_MAIN_TTL, corsHeaders, env);
-  }
-
-  const key = `home/v8${sourceKey}`;
-  const hit = await cacheGet(key);
-  if (hit) return hit;
-
-  const [pelis, series, anime, home] = await Promise.allSettled([
-    pelispediaFetch(`${PELISPEDIA_URL}/peliculas?page=1`),
-    pelispediaFetch(`${PELISPEDIA_URL}/series?page=1`),
-    pelispediaFetch(`${PELISPEDIA_URL}/animes?page=1`),
-    pelispediaFetch(`${PELISPEDIA_URL}/`),
-  ]);
-
-  const sections = [];
-  const seenTitles = new Set();
-
-  const addItemsToSection = (items, slug, title, hasMore = true, dedupe = true) => {
-    const fresh = dedupe ? items.filter(it => {
-      const t = normTitle(it.title);
-      if (!t || seenTitles.has(t)) return false;
-      seenTitles.add(t);
-      return true;
-    }) : items;
-    if (!fresh.length) return;
-    let sec = sections.find(s => s.slug === slug);
-    if (!sec) {
-      sec = { slug, title, hasMore, items: [] };
-      sections.push(sec);
-    }
-    sec.items.push(...fresh);
-  };
-
-  let homeItems = dedupItems(extractPelispediaItems(home.status === 'fulfilled' ? home.value : ''));
-  if (!homeItems.length) {
-    homeItems = dedupItems(extractPelispediaItems(pelis.status === 'fulfilled' ? pelis.value : ''));
-  }
-  addItemsToSection(filterBySource(homeItems), 'estrenos', 'Estrenos', true);
-  addItemsToSection(filterBySource(dedupItems(extractPelispediaItems(pelis.status === 'fulfilled' ? pelis.value : ''))), 'peliculas', 'Películas', true);
-  addItemsToSection(filterBySource(dedupItems(extractPelispediaItems(series.status === 'fulfilled' ? series.value : ''))), 'series', 'Series', true);
-  addItemsToSection(filterBySource(dedupItems(extractPelispediaItems(anime.status === 'fulfilled' ? anime.value : ''))), 'anime', 'Anime', true);
-
-  const genreRes = await Promise.allSettled(GENRE_SECTIONS.map(async ([slug, title]) => {
-    try {
-      const html = await pelispediaFetch(`${PELISPEDIA_URL}/generos/${slug}?page=1`);
-      return { slug: 'genero-' + slug, title, items: filterBySource(dedupItems(extractPelispediaItems(html))) };
-    } catch (e) { return { slug: 'genero-' + slug, title, items: [] }; }
-  }));
-  for (const r of genreRes) {
-    if (r.status === 'fulfilled' && r.value.items.length) {
-      addItemsToSection(r.value.items, r.value.slug, r.value.title, true, false);
-    }
-  }
-
-  const enriched = await enrichItems(sections.flatMap(s => s.items), env);
-  const enrichedByUrl = new Map(enriched.map(it => [it.url, it]));
-  for (const sec of sections) {
-    sec.items = sec.items.map(it => enrichedByUrl.get(it.url) || it);
-  }
-
-  return cachePut(key, { sections }, CACHE_MAIN_TTL, corsHeaders, env);
-}
-
-function normalizeQuery(q) {
-  return String(q).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-function cleanQuery(q) {
-  return String(q)
-    .replace(/\s*\(\d{4}\)\s*/g, ' ')
-    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function handleSearch(query, page, env, corsHeaders, source) {
-  if (!query || query.trim() === '') {
-    return handleMainPage(new URL('https://localhost/api/mainpage'), env, corsHeaders);
-  }
-
-  const cacheKey = 'search/v5/' + encodeURIComponent(query.trim().toLowerCase()) + (source ? '/' + source.toLowerCase() : '');
-  const hit = await cacheGet(cacheKey);
-  if (hit) return hit;
-
-  const variants = [query.trim(), normalizeQuery(query.trim())];
-  const cleaned = cleanQuery(query.trim());
-  if (cleaned && !variants.includes(cleaned)) variants.push(cleaned);
-
-  let combined = [];
-  const seen = new Set();
-  for (const variant of variants) {
-    if (combined.length > 0) break;
-    let items = [];
-    try {
-      const html = await pelispediaFetch(`${PELISPEDIA_URL}/search?s=${encodeURIComponent(variant)}`);
-      items = dedupItems(extractPelispediaItems(html));
-    } catch (e) {}
-    combined = items.filter(it => {
-      const key = it.url;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+function extractPelispediaItems(html) {
+  const items = [];
+  const re = /<article[^>]*class="post dfx fcl[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const block = m[1];
+    const link = block.match(/<a[^>]*href="([^"]*)"[^>]*class="[^"]*lnk-blk[^"]*"/i);
+    if (!link) continue;
+    const titleMatch = block.match(/<h2[^>]*class="entry-title"[^>]*>([\s\S]*?)<\/h2>/i);
+    if (!titleMatch) continue;
+    const title = decodeEntities(titleMatch[1].replace(/<[^>]*>/g, '')).trim();
+    if (!title) continue;
+    const yearMatch = block.match(/<span class="year">(\d{4})<\/span>/);
+    const type = /\/anime\//.test(link[1]) ? 'tv' : /\/pelicula\//.test(link[1]) ? 'movie' : 'tv';
+    items.push({
+      title,
+      url: link[1].startsWith('/') ? 'https://pelispedia.is' + link[1] : link[1],
+      type,
+      year: yearMatch ? parseInt(yearMatch[1]) : null,
     });
   }
+  return items;
+}
 
-  if (combined.length === 0) {
-    return cachePut(cacheKey, [], CACHE_SEARCH_TTL, corsHeaders, env);
+function pelispediaEmbeds(html) {
+  return [...html.matchAll(/<iframe[^>]*src="([^"]*\/\?trembed=[^"]*)"/gi)]
+    .map(m => decodeEntities(m[1]).replace(/&#038;/g, '&'))
+    .filter(u => /^https?:/.test(u));
+}
+
+function extractMonoschinosItems(html) {
+  const items = [];
+  const re = /<article>([\s\S]*?)<\/article>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const block = m[1];
+    const link = block.match(/<a[^>]*href="([^"]*\/anime\/[^"]*)"[^>]*class="[^"]*card-wrap[^"]*"/i);
+    if (!link) continue;
+    const titleMatch = block.match(/<h3[^>]*class="card-title[^"]*"[^>]*>([\s\S]*?)<\/h3>/i);
+    if (!titleMatch) continue;
+    const title = decodeEntities(titleMatch[1].replace(/<[^>]*>/g, '')).trim();
+    if (!title) continue;
+    items.push({ title, url: link[1], type: 'tv', year: null });
   }
-
-  if (source) combined = combined.filter(it => (it.source || '').toLowerCase() === source.toLowerCase());
-  if (combined.length === 0) {
-    return cachePut(cacheKey, [], CACHE_SEARCH_TTL, corsHeaders, env);
-  }
-
-  combined = await enrichItems(combined, env);
-  combined.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-  return cachePut(cacheKey, combined, CACHE_SEARCH_TTL, corsHeaders, env);
+  return items;
 }
 
-async function handleDetails(targetUrl, corsHeaders, env) {
-  try {
-    if (!assertSafeUrl(targetUrl, PROVIDER_ALLOWED_HOSTS)) {
-      return jsonResponse({ error: 'URL no permitida' }, corsHeaders, 403);
-    }
-    const cacheKey = 'details/v1/' + encodeURIComponent(targetUrl);
-    const hit = await cacheGet(cacheKey);
-    if (hit) return hit;
-    const details = await getPelispediaDetails(targetUrl);
-    if (details && details.type === 'series' && env && env.DB) {
-      const { results } = await env.DB.prepare(
-        'SELECT season, episode, name, download_link, is_custom FROM episode_metadata WHERE series_url = ?'
-      ).bind(targetUrl).all();
-      const linkMap = {};
-      const customs = [];
-      for (const row of results || []) {
-        if (row.is_custom) {
-          customs.push({
-            name: row.name || 'Capítulo ' + row.episode,
-            link: null,
-            season: row.season,
-            episode: row.episode,
-            poster: null,
-            download_link: row.download_link || null,
-            custom: true,
-          });
-        } else {
-          linkMap[`${row.season}|${row.episode}`] = row.download_link;
-        }
-      }
-      details.episodes = (details.episodes || []).map(ep => {
-        const dl = linkMap[`${ep.season}|${ep.episode}`];
-        if (dl) ep.download_link = dl;
-        return ep;
-      });
-      if (customs.length) {
-        details.episodes = details.episodes.concat(customs).sort((a, b) => a.season - b.season || a.episode - b.episode);
-      }
-    }
-    return cachePut(cacheKey, details, 600, corsHeaders, env);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, corsHeaders, 500);
-  }
-}
-
-async function handleListEpisodes(seriesUrl, env, corsHeaders) {
-  try {
-    const { results } = await env.DB.prepare(
-      'SELECT season, episode, name, download_link, is_custom, updated_at FROM episode_metadata WHERE series_url = ? ORDER BY season, episode'
-    ).bind(seriesUrl).all();
-    return jsonResponse(results || [], corsHeaders);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, corsHeaders, 500);
-  }
-}
-
-async function handleUpsertEpisode(request, env, corsHeaders) {
-  try {
-    const body = await request.json();
-    const { series_url, season, episode, name, download_link, is_custom } = body;
-    if (!series_url || season === undefined || season === null || season === '' || episode === undefined || episode === null || episode === '') {
-      return jsonResponse({ error: 'Missing fields' }, corsHeaders, 400);
-    }
-    const s = parseInt(season);
-    const e = parseInt(episode);
-    if (!Number.isFinite(s) || !Number.isFinite(e) || s <= 0 || e <= 0) {
-      return jsonResponse({ error: 'Temporada y capítulo deben ser números positivos' }, corsHeaders, 400);
-    }
-    const dl = (download_link || '').trim() || null;
-    const custom = is_custom ? 1 : 0;
-    if (!custom && !dl) {
-      await env.DB.prepare('DELETE FROM episode_metadata WHERE series_url = ? AND season = ? AND episode = ?').bind(series_url, s, e).run();
-      await invalidateDetails(series_url, env);
-      return jsonResponse({ ok: true, cleared: true }, corsHeaders);
-    }
-    await env.DB.prepare(
-      'INSERT OR REPLACE INTO episode_metadata (series_url, season, episode, name, download_link, is_custom, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(series_url, s, e, (name || '').trim() || null, dl, custom, Date.now()).run();
-    await invalidateDetails(series_url, env);
-    return jsonResponse({ ok: true }, corsHeaders);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, corsHeaders, 500);
-  }
-}
-
-async function handleDeleteEpisode(url, env, corsHeaders) {
-  try {
-    const seriesUrl = url.searchParams.get('series_url');
-    const season = url.searchParams.get('season');
-    const episode = url.searchParams.get('episode');
-    if (!seriesUrl || !season || !episode) return jsonResponse({ error: 'Missing params' }, corsHeaders, 400);
-    await env.DB.prepare('DELETE FROM episode_metadata WHERE series_url = ? AND season = ? AND episode = ?')
-      .bind(seriesUrl, parseInt(season), parseInt(episode)).run();
-    await invalidateDetails(seriesUrl, env);
-    return jsonResponse({ ok: true }, corsHeaders);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, corsHeaders, 500);
-  }
-}
-
-async function handleLinks(targetUrl, corsHeaders, env) {
-  try {
-    if (!assertSafeUrl(targetUrl, PROVIDER_ALLOWED_HOSTS)) {
-      return jsonResponse({ error: 'URL no permitida' }, corsHeaders, 403);
-    }
-    const cacheKey = 'links/v1/' + encodeURIComponent(targetUrl);
-    const hit = await cacheGet(cacheKey);
-    if (hit) return hit;
-    const links = await getPelispediaLinks(targetUrl);
-    return cachePut(cacheKey, links, 600, corsHeaders, env);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, corsHeaders, 500);
-  }
-}
-
-// ==================== METADATOS PERSONALIZADOS ====================
-async function enrichItems(items, env) {
-  if (!items || items.length === 0) return items;
-  const metadataMap = {};
-
-  for (let i = 0; i < items.length; i += D1_CHUNK) {
-    const chunk = items.slice(i, i + D1_CHUNK);
-    const urls = chunk.map(item => item.url);
-    const placeholders = urls.map(() => '?').join(',');
-    const { results } = await env.DB.prepare(`SELECT * FROM movie_metadata WHERE external_url IN (${placeholders})`).bind(...urls).all();
-    results.forEach(row => {
-      metadataMap[row.external_url] = row;
-    });
-  }
-
-  return items.map(item => {
-    const meta = metadataMap[item.url];
-    if (meta) {
-      if (meta.custom_category) item.category = meta.custom_category;
-      if (meta.download_link) item.download_link = meta.download_link;
-      item.metadata_id = meta.id;
-    }
-    if (!item.category) {
-      item.category = 'Estrenos';
-    }
-    return item;
-  });
-}
-
-async function handleGetMetadata(externalUrl, env, corsHeaders) {
-  const result = await env.DB.prepare('SELECT * FROM movie_metadata WHERE external_url = ?').bind(externalUrl).first();
-  return jsonResponse(result || null, corsHeaders);
-}
-
-async function handleGetCategories(env, corsHeaders) {
-  const { results } = await env.DB.prepare('SELECT DISTINCT custom_category FROM movie_metadata WHERE custom_category IS NOT NULL AND custom_category != ""').all();
-  const categories = results.map(r => r.custom_category).filter(Boolean).sort();
-  return jsonResponse(categories, corsHeaders);
-}
-
-async function handleGetByCategory(category, env, corsHeaders) {
-  try {
-    const { results } = await env.DB.prepare('SELECT * FROM movie_metadata WHERE custom_category = ? ORDER BY title ASC').bind(category).all();
-    const items = results.map(row => ({
-      id: row.id,
-      title: row.title || 'Sin título',
-      url: row.external_url,
-      poster: null,
-      download_link: row.download_link,
-      external: true,
-      category: row.custom_category,
-      metadata_id: row.id,
-    }));
-    await mapLimit(items, 6, async it => {
-      if (!assertSafeUrl(it.url, PROVIDER_ALLOWED_HOSTS)) return;
+function monoschinosEmbeds(html) {
+  return [...html.matchAll(/data-player="([^"]+)"/gi)]
+    .map(m => {
       try {
-        const details = await getPelispediaDetails(it.url);
-        if (details && details.poster) it.poster = details.poster;
-      } catch (e) {}
-    });
-    return jsonResponse(items, corsHeaders);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, corsHeaders, 500);
+        const fixed = m[1].replace(/-/g, '+').replace(/_/g, '/');
+        return atob(fixed + '='.repeat((4 - fixed.length % 4) % 4));
+      } catch (e) { return ''; }
+    })
+    .filter(u => /^https?:/.test(u));
+}
+
+function extractLatanimeItems(html) {
+  const items = [];
+  const re = /<a[^>]*href="([^"]*\/anime\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const block = m[2];
+    if (!block.includes('class="series"')) continue;
+    const titleMatch = block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+    if (!titleMatch) continue;
+    const title = decodeEntities(titleMatch[1].replace(/<[^>]*>/g, '')).trim();
+    if (!title) continue;
+    items.push({ title, url: m[1], type: 'tv', year: null });
   }
+  return items;
 }
 
-async function handleSaveMetadata(request, env, corsHeaders) {
-  const body = await request.json();
-  const { id, title, external_url, custom_category, download_link } = body;
-  if (!id || !title || !external_url) {
-    return jsonResponse({ error: 'Missing required fields' }, corsHeaders, 400);
+function latanimeEmbeds(html) {
+  return [...html.matchAll(/data-player="([^"]+)"/gi)]
+    .map(m => {
+      try {
+        const fixed = m[1].replace(/-/g, '+').replace(/_/g, '/');
+        return atob(fixed + '='.repeat((4 - fixed.length % 4) % 4));
+      } catch (e) { return ''; }
+    })
+    .filter(u => /^https?:/.test(u));
+}
+
+const SITES = {
+  movies: [
+    {
+      name: 'Cinecalidad',
+      searchUrl: q => `https://www.cinecalidad.am/?s=${encodeURIComponent(q)}`,
+      parse: extractCinecalidadItems,
+      embeds: cinecalidadEmbeds,
+      episodeLinks: cinecalidadEpisodeLinks,
+      hasEpisodes: false,
+    },
+    {
+      name: 'Pelispedia',
+      searchUrl: q => `https://pelispedia.is/?s=${encodeURIComponent(q)}`,
+      parse: extractPelispediaItems,
+      embeds: pelispediaEmbeds,
+      episodeUrl: (base, season, episode) => {
+        const slug = base.replace(/\/+$/, '').split('/').pop();
+        return `https://pelispedia.is/temporada/${season}/capitulo/${episode}/`;
+      },
+      hasEpisodes: true,
+    },
+    {
+      name: 'SeriesMetro',
+      searchUrl: q => `https://www3.seriesmetro.net/?s=${encodeURIComponent(q)}`,
+      parse: extractPelispediaItems,
+      embeds: pelispediaEmbeds,
+      episodeUrl: (base, season, episode) => {
+        const slug = base.replace(/\/+$/, '').split('/').pop();
+        return `https://www3.seriesmetro.net/temporada/${season}/capitulo/${episode}/`;
+      },
+      hasEpisodes: true,
+    },
+  ],
+  anime: [
+    {
+      name: 'Monoschinos',
+      searchUrl: q => `https://monoschinos.st/buscar?q=${encodeURIComponent(q)}`,
+      parse: extractMonoschinosItems,
+      embeds: monoschinosEmbeds,
+      episodeUrl: (base, season, episode) => {
+        const slug = base.replace(/\/+$/, '').split('/').pop();
+        return `https://monoschinos.st/ver/${slug}-episodio-${episode}`;
+      },
+      hasEpisodes: true,
+    },
+    {
+      name: 'LaTAnime',
+      searchUrl: q => `https://latanime.org/buscar?q=${encodeURIComponent(q)}`,
+      parse: extractLatanimeItems,
+      embeds: latanimeEmbeds,
+      episodeUrl: (base, season, episode) => {
+        const slug = base.replace(/\/+$/, '').split('/').pop();
+        return `https://latanime.org/ver/${slug}-episodio-${episode}`;
+      },
+      hasEpisodes: true,
+    },
+  ],
+};
+
+function pickEpisodeUrl(site, item, season, episode) {
+  if (!season || !episode) return item.url;
+  if (site.hasEpisodes) {
+    const built = site.episodeUrl(item.url, season, episode);
+    return built || item.url;
   }
-  if (!assertSafeUrl(external_url, PROVIDER_ALLOWED_HOSTS)) {
-    return jsonResponse({ error: 'Dominio no permitido' }, corsHeaders, 400);
+  return item.url;
+}
+
+async function resolveEmbed(embedUrl, deadline) {
+  if (Date.now() > deadline) return null;
+  if (!assertSafeUrl(embedUrl, STREAM_ALLOWED_HOSTS)) return null;
+  const hostResult = await tryHostExtractors(embedUrl);
+  if (hostResult && (await verifyStream(hostResult))) {
+    return { ...hostResult, sourceUrl: embedUrl };
   }
-  if (download_link && !assertSafeUrl(download_link)) {
-    return jsonResponse({ error: 'Enlace de descarga no válido' }, corsHeaders, 400);
+  if (Date.now() > deadline) return null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (Date.now() > deadline) return null;
+    let result = null;
+    try {
+      result = await extractOnce(embedUrl, deadline);
+    } catch (e) {}
+    if (result && (await verifyStream(result))) {
+      return { ...result, sourceUrl: embedUrl };
+    }
   }
-  await env.DB.prepare(`
-    INSERT OR REPLACE INTO movie_metadata (id, title, external_url, custom_category, download_link, updated_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `).bind(id, title, external_url, custom_category || null, download_link || null).run();
-  await invalidateMainPage(env);
-  await invalidateDetails(external_url, env);
-  return jsonResponse({ success: true }, corsHeaders);
+  return null;
 }
 
-async function handleDeleteMetadata(externalUrl, env, corsHeaders) {
-  await env.DB.prepare('DELETE FROM movie_metadata WHERE external_url = ?').bind(externalUrl).run();
-  await invalidateMainPage(env);
-  await invalidateDetails(externalUrl, env);
-  return jsonResponse({ success: true }, corsHeaders);
+async function trySite(site, query, season, episode, deadline) {
+  if (Date.now() > deadline) return { fast: null, iframe: null };
+  let items = [];
+  try {
+    const html = await fetchHTML(site.searchUrl(query), 8000);
+    items = site.parse(html);
+  } catch (e) {
+    return { fast: null, iframe: null };
+  }
+  const q = normTitle(query);
+  const match = items.find(it => normTitle(it.title) === q)
+    || items.find(it => normTitle(it.title).includes(q) || q.includes(normTitle(it.title)));
+  if (!match) return { fast: null, iframe: null };
+
+  let embeds = [];
+  try {
+    let target = pickEpisodeUrl(site, match, season, episode);
+    let html = await fetchHTML(target, 8000);
+    if (season && episode && site.episodeLinks) {
+      const ep = site.episodeLinks(html).find(l => l.season === season && l.episode === episode);
+      if (ep) html = await fetchHTML(ep.url, 8000);
+    }
+    embeds = site.embeds(html);
+  } catch (e) {
+    return { fast: null, iframe: null };
+  }
+  if (!embeds.length) return { fast: null, iframe: null };
+
+  const sorted = sortEmbeds(embeds);
+  const firstIframe = sorted.find(u => fastRank(u) === -1) || null;
+  for (const u of sorted) {
+    if (fastRank(u) === -1) break;
+    const result = await resolveEmbed(u, deadline);
+    if (result) return { fast: result, iframe: null };
+    if (Date.now() > deadline) break;
+  }
+  return { fast: null, iframe: firstIframe };
 }
 
-async function handleGetAllMetadata(env, corsHeaders) {
-  const { results } = await env.DB.prepare('SELECT * FROM movie_metadata ORDER BY title ASC').all();
-  return jsonResponse(results, corsHeaders);
+async function handlePlay(url, env, corsHeaders) {
+  const title = (url.searchParams.get('title') || '').trim();
+  const year = url.searchParams.get('year');
+  const type = url.searchParams.get('type') === 'tv' ? 'tv' : 'movie';
+  const season = parseInt(url.searchParams.get('season')) || null;
+  const episode = parseInt(url.searchParams.get('episode')) || null;
+  const anime = url.searchParams.get('anime') === '1';
+  if (!title) return jsonResponse({ error: 'Missing title' }, corsHeaders, 400);
+
+  const sites = anime ? SITES.anime : SITES.movies;
+  const deadline = Date.now() + (season ? 16000 : 12000);
+  const query = year ? `${title} ${year}` : title;
+
+  let fallbackIframe = null;
+  const results = await mapLimit(sites, sites.length, async site => {
+    const r = await trySite(site, query, season, episode, deadline);
+    if (r.iframe && !fallbackIframe) fallbackIframe = r.iframe;
+    return r.fast;
+  });
+  const winner = results.find(Boolean);
+  if (winner) {
+    return jsonResponse({ ok: true, ...winner }, corsHeaders);
+  }
+  if (fallbackIframe) {
+    return jsonResponse({ ok: false, iframe: fallbackIframe }, corsHeaders);
+  }
+  return jsonResponse({ ok: false }, corsHeaders);
 }
 
-// ==================== AVATAR ====================
-async function handleGetAvatar(env, corsHeaders) {
-  const { results } = await env.DB.prepare('SELECT value FROM config WHERE key = ?').bind('avatar').all();
-  const avatar = results.length ? results[0].value : '';
-  return jsonResponse({ avatar }, corsHeaders);
-}
-
-async function handleUpdateAvatar(request, env, corsHeaders) {
-  const { avatar } = await request.json();
-  await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind('avatar', avatar).run();
-  return jsonResponse({ success: true }, corsHeaders);
-}
-
-async function handleDeleteAvatar(env, corsHeaders) {
-  await env.DB.prepare('UPDATE config SET value = ? WHERE key = ?').bind('', 'avatar').run();
-  return jsonResponse({ success: true }, corsHeaders);
-}
-
-// ==================== REPRODUCTOR PROPIO (patrón CloudStream: ExtractorLink) ====================
-const STREAM_TIMEOUT = 12000;
-
+// ==================== REPRODUCTOR PROPIO ====================
 const STREAM_HOSTS = [
   { re: /(?:doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch|video)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com)/i, fn: extractDoodstream },
   { re: /byse\w*\.(?:com|sx)/i, fn: extractByse },
   { re: /(?:streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash)/i, fn: extractStreamTape },
   { re: /(?:hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|embedwish\.com|wishembed\.pro|kswplayer\.info|wishfast\.top|streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to)/i, fn: extractStreamWish },
 ];
-
-const STREAM_IFRAME_ONLY = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|vide0\.net|minochinos\.com|acek-cdn\.com|dramiyos-cdn\.com|cloudatacdn\.com|voe\.sx)/i;
 
 function b64UrlDecode(str) {
   const fixed = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -884,9 +790,9 @@ async function extractDoodstream(url) {
   const embedUrl = url.replace('/d/', '/e/');
   const { url: finalUrl, text: html } = await fetchFollow(embedUrl, STREAM_TIMEOUT);
   const host = new URL(finalUrl).origin;
-  const md5Match = html.match(/\/pass_md5\/[^']*/);
+  const md5Match = html.match(/\/pass_md5\/([0-9a-zA-Z]+)/);
   if (!md5Match) return null;
-  const md5Url = host + md5Match[0];
+  const md5Url = host + '/pass_md5/' + md5Match[1];
   const res = await fetch(md5Url, {
     headers: { 'User-Agent': USER_AGENT, 'Referer': finalUrl },
     redirect: 'follow'
@@ -1045,9 +951,9 @@ function findStreamUrl(html) {
 
 async function extractOnce(targetUrl, deadline) {
   let current = targetUrl;
-  for (let hop = 0; hop < 4; hop++) {
+  for (let hop = 0; hop < 5; hop++) {
     if (deadline && Date.now() > deadline) return null;
-    if (!assertSafeUrl(current)) return null;
+    if (!assertSafeUrl(current, STREAM_ALLOWED_HOSTS)) return null;
     const html = await fetchHTML(current, STREAM_TIMEOUT);
     const redirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
     if (redirectMatch) {
@@ -1056,6 +962,14 @@ async function extractOnce(targetUrl, deadline) {
       else if (/^https?:/.test(next)) current = next;
       else break;
       continue;
+    }
+    const iframeMatch = html.match(/<iframe[^>]*src="([^"]+)"/i);
+    if (iframeMatch) {
+      const next = decodeEntities(iframeMatch[1]);
+      if (/^https?:/.test(next) && assertSafeUrl(next, STREAM_ALLOWED_HOSTS)) {
+        current = next;
+        continue;
+      }
     }
     const unpacked = unpackPacker(html);
     const found = findStreamUrl(unpacked) || findStreamUrl(html);
@@ -1131,12 +1045,6 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
       if (await verifyStream(hostResult)) {
         return cachePut(cacheKey, { ok: true, ...hostResult }, 300, corsHeaders, env);
       }
-      return jsonResponse({ ok: false }, corsHeaders);
-    }
-    if (STREAM_HOSTS.some(h => h.re.test(targetUrl))) {
-      return jsonResponse({ ok: false }, corsHeaders);
-    }
-    if (STREAM_IFRAME_ONLY.test(targetUrl)) {
       return jsonResponse({ ok: false }, corsHeaders);
     }
     const deadline = Date.now() + 15000;
@@ -1248,31 +1156,45 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
   }
 }
 
-// ==================== ADMIN: STATS / CACHE / CATEGORIAS ====================
+// ==================== ADMIN ====================
+async function handleGetAvatar(env, corsHeaders) {
+  const { results } = await env.DB.prepare('SELECT value FROM config WHERE key = ?').bind('avatar').all();
+  const avatar = results.length ? results[0].value : '';
+  return jsonResponse({ avatar }, corsHeaders);
+}
+
+async function handleUpdateAvatar(request, env, corsHeaders) {
+  const { avatar } = await request.json();
+  await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind('avatar', avatar).run();
+  return jsonResponse({ success: true }, corsHeaders);
+}
+
+async function handleDeleteAvatar(env, corsHeaders) {
+  await env.DB.prepare('UPDATE config SET value = ? WHERE key = ?').bind('', 'avatar').run();
+  return jsonResponse({ success: true }, corsHeaders);
+}
+
 async function handleAdminStats(env, corsHeaders) {
-  const [cats, meta, dl, eps, epLinks, sSearch, sHome, sOther] = await Promise.all([
-    env.DB.prepare('SELECT COUNT(DISTINCT custom_category) c FROM movie_metadata WHERE custom_category IS NOT NULL AND custom_category != ""').first(),
-    env.DB.prepare('SELECT COUNT(*) c FROM movie_metadata').first(),
-    env.DB.prepare('SELECT COUNT(*) c FROM movie_metadata WHERE download_link IS NOT NULL AND download_link != ""').first(),
-    env.DB.prepare('SELECT COUNT(*) c FROM episode_metadata WHERE is_custom = 1').first(),
-    env.DB.prepare('SELECT COUNT(*) c FROM episode_metadata WHERE is_custom = 0 AND download_link IS NOT NULL AND download_link != ""').first(),
+  const [sSearch, sHome, sOther, sTmdb] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'search/%'").first(),
     env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'home/%'").first(),
-    env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key NOT LIKE 'search/%' AND key NOT LIKE 'home/%'").first(),
+    env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key NOT LIKE 'search/%' AND key NOT LIKE 'home/%' AND key NOT LIKE 'tmdb/%'").first(),
+    env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'tmdb/%'").first(),
   ]);
   return jsonResponse({
-    categories: cats.c, metadata: meta.c, with_download: dl.c,
-    custom_episodes: eps.c, episode_links: epLinks.c,
-    cache: { search: sSearch.c, home: sHome.c, other: sOther.c }
+    cache: { search: sSearch.c, home: sHome.c, tmdb: sTmdb.c, other: sOther.c }
   }, corsHeaders);
 }
 
 async function handleCachePurge(request, env, corsHeaders) {
   const { scope } = await request.json();
-  if (!['all', 'search', 'home'].includes(scope)) {
+  if (!['all', 'search', 'home', 'tmdb'].includes(scope)) {
     return jsonResponse({ error: 'Invalid scope' }, corsHeaders, 400);
   }
-  const where = scope === 'all' ? '' : scope === 'search' ? " WHERE key LIKE 'search/%'" : " WHERE key LIKE 'home/%'";
+  const where = scope === 'all' ? ''
+    : scope === 'search' ? " WHERE key LIKE 'search/%'"
+    : scope === 'home' ? " WHERE key LIKE 'home/%'"
+    : " WHERE key LIKE 'tmdb/%'";
   const { results } = await env.DB.prepare('SELECT key FROM cache_keys' + where).all();
   let deleted = 0;
   for (const row of results) {
@@ -1282,12 +1204,4 @@ async function handleCachePurge(request, env, corsHeaders) {
   await env.DB.prepare('DELETE FROM cache_keys' + where).run();
   const stale = await env.DB.prepare("DELETE FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").run();
   return jsonResponse({ success: true, deleted, stale: stale.meta.changes || 0 }, corsHeaders);
-}
-
-async function handleCategoryRename(request, env, corsHeaders) {
-  const { from, to } = await request.json();
-  if (!from || !to) return jsonResponse({ error: 'Missing from/to' }, corsHeaders, 400);
-  await env.DB.prepare('UPDATE movie_metadata SET custom_category = ? WHERE custom_category = ?').bind(to, from).run();
-  await invalidateMainPage(env);
-  return jsonResponse({ success: true }, corsHeaders);
 }

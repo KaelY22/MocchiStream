@@ -2,10 +2,9 @@ import { API_BASE, showToast, resetStorageIfStale } from './utils.js';
 import { loadLists, toggleFavFromCard, removeFromHistory, removeFromWatchLater } from './catalog.js';
 import { loadHome, renderContinueRow } from './home.js';
 import { setupSearch, setupFilterChips } from './search.js';
-import { loadCatsView, backToCats } from './categories.js';
 import { setupLibrary, renderLibrary } from './library.js';
-import { openDetailFromUrl, initDetail, closeDetail, detailDownload, epDownload } from './detail.js';
-import { initPlayer, closeFullPlayer, closeSheet } from './player.js';
+import { openDetailFromId, initDetail, closeDetail } from './detail.js';
+import { initPlayer, closeFullPlayer } from './player.js';
 
 let deferredInstall = null;
 
@@ -19,16 +18,17 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLibrary();
   initDetail();
   initPlayer();
-  loadCatsView();
   loadHome();
   setupPtr();
   setupInstall();
   registerSW();
-  const deep = new URLSearchParams(location.search).get('t');
-  if (deep) setTimeout(() => openDetailFromUrl(deep), 400);
+  const params = new URLSearchParams(location.search);
+  const deepId = params.get('t');
+  const deepType = params.get('type') || 'movie';
+  if (deepId) setTimeout(() => openDetailFromId(deepId, deepType), 400);
   document.addEventListener('click', e => {
     const card = e.target.closest('.video-card');
-    if (card) openDetailFromUrl(decodeURIComponent(card.dataset.url));
+    if (card) openDetailFromId(card.dataset.id, card.dataset.type);
   });
 });
 
@@ -41,7 +41,6 @@ function showView(name) {
     const input = document.getElementById('searchInput');
     setTimeout(() => input.focus(), 120);
   }
-  if (name === 'selections') loadCatsView();
   if (name === 'library') renderLibrary();
   if (name === 'profile') {
     const img = document.getElementById('profileAvatar');
@@ -95,10 +94,11 @@ function loginAdmin() {
 
 function shareTitle() {
   const btn = document.getElementById('detailShareBtn');
-  const url = btn.dataset.url;
+  const id = btn.dataset.id;
+  const type = btn.dataset.type;
   const title = btn.dataset.title;
-  if (!url) return;
-  const link = `${location.origin}/?t=${encodeURIComponent(url)}`;
+  if (!id) return;
+  const link = `${location.origin}/?t=${encodeURIComponent(id)}&type=${encodeURIComponent(type || 'movie')}`;
   const text = `${title} — Míralo en MocchiStream`;
   if (navigator.share) {
     navigator.share({ title, text, url: link }).catch(() => {});
@@ -152,7 +152,6 @@ document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea') { e.target.blur(); return; }
   if (!document.getElementById('fullPlayer').classList.contains('hidden')) { closeFullPlayer(); return; }
-  if (!document.getElementById('sourceSheet').classList.contains('hidden')) { closeSheet(); return; }
   if (!document.getElementById('detailView').classList.contains('hidden')) { closeDetail(); return; }
   if (!document.getElementById('adminLoginModal').classList.contains('hidden')) {
     document.getElementById('adminLoginModal').classList.add('hidden');
@@ -223,10 +222,7 @@ function refreshHome() {
 window.toggleFavFromCard = toggleFavFromCard;
 window.removeFromHistory = removeFromHistory;
 window.removeFromWatchLater = removeFromWatchLater;
-window.backToCats = backToCats;
 window.closeDetail = closeDetail;
-window.detailDownload = detailDownload;
-window.epDownload = epDownload;
 window.closeFullPlayer = closeFullPlayer;
 window.openAdminModal = openAdminModal;
 window.loginAdmin = loginAdmin;

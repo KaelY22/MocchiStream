@@ -1,10 +1,11 @@
-import { esc, PLACEHOLDER_SVG, showToast, loadLS, saveLS, API_BASE, safeImg } from './utils.js';
+import { API_BASE, esc, safeImg, showToast, loadLS, saveLS, normTitle, PLACEHOLDER_SVG } from './utils.js';
 
 let favs = [];
 let history = [];
 let watchLater = [];
 let detailFavUpdater = null;
 let listChangeListener = null;
+let currentDetailItem = null;
 
 const KEEP_RE = /pelispedia\./i;
 
@@ -13,39 +14,63 @@ function cleanStale(list) {
 }
 
 export function loadLists() {
-  const rawFavs = loadLS('ms_favs', []);
-  const rawHistory = loadLS('ms_history', []);
-  const rawWatch = loadLS('ms_watchlater', []);
-  favs = cleanStale(rawFavs);
-  history = cleanStale(rawHistory);
-  watchLater = cleanStale(rawWatch);
-  if (favs.length !== rawFavs.length) saveLS('ms_favs', favs);
-  if (history.length !== rawHistory.length) saveLS('ms_history', history);
-  if (watchLater.length !== rawWatch.length) saveLS('ms_watchlater', watchLater);
-  backfillHistoryPosters();
+  favs = cleanStale(loadLS('ms_favs', []));
+  history = cleanStale(loadLS('ms_history', []));
+  watchLater = cleanStale(loadLS('ms_watchlater', []));
+  migrateLegacyLists();
 }
 
-async function backfillHistoryPosters() {
-  const missing = history.filter(h => h && h.url && !h.poster).slice(0, 20);
-  if (!missing.length) return;
+async function migrateLegacyLists() {
+  const legacy = [...favs, ...history, ...watchLater].filter(i => i && i.url && !i.id);
+  if (!legacy.length) return;
+  showToast('Migrando tu lista al nuevo catálogo...');
+  const resolved = new Map();
+  const seen = new Set();
   let idx = 0;
-  const workers = Array.from({ length: 4 }, async () => {
+  const workers = Array.from({ length: 3 }, async () => {
     while (true) {
       const i = idx++;
-      if (i >= missing.length) return;
-      const h = missing[i];
+      if (i >= legacy.length) return;
+      const old = legacy[i];
+      const key = old.url;
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        const r = await fetch(`${API_BASE}/details?url=${encodeURIComponent(h.url)}`);
-        const d = await r.json();
-        if (d && d.poster && !h.poster) h.poster = d.poster;
+        const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(old.title || '')}`);
+        const items = await res.json();
+        const q = normTitle(old.title);
+        const match = (items || []).find(it => normTitle(it.title) === q)
+          || (items || []).find(it => normTitle(it.title).includes(q) || q.includes(normTitle(it.title)));
+        if (match) resolved.set(key, { id: match.id, type: match.type, title: match.title, poster: match.poster });
       } catch (e) {}
     }
   });
   await Promise.allSettled(workers);
-  if (missing.some(h => h.poster)) {
-    saveLS('ms_history', history);
-    notifyListChanged();
-  }
+  const mapList = list => list.map(it => {
+    if (it && it.id) return it;
+    const r = resolved.get(it.url);
+    if (r) return { id: r.id, type: r.type, title: r.title, poster: r.poster || null };
+    return null;
+  }).filter(Boolean);
+  favs = mapList(favs);
+  history = mapList(history);
+  watchLater = mapList(watchLater);
+  saveLS('ms_favs', favs);
+  saveLS('ms_history', history);
+  saveLS('ms_watchlater', watchLater);
+  notifyListChanged();
+}
+
+function itemKey(item) {
+  return `${item?.type || 'movie'}|${item?.id}`;
+}
+
+export function isFav(item) {
+  return favs.some(f => itemKey(f) === itemKey(item));
+}
+
+export function isInWatchLater(item) {
+  return watchLater.some(w => itemKey(w) === itemKey(item));
 }
 
 export function getFavs() { return favs; }
@@ -57,129 +82,115 @@ export function setListChangeListener(fn) { listChangeListener = fn; }
 
 function notifyListChanged() {
   if (listChangeListener) listChangeListener();
-}
-
-export function isFav(url) {
-  return favs.some(f => f.url === url);
-}
-
-export function toggleFav(item) {
-  const idx = favs.findIndex(f => f.url === item.url);
-  if (idx >= 0) {
-    favs.splice(idx, 1);
-    showToast('Eliminado de Mi lista');
-  } else {
-    favs.unshift({ url: item.url, title: item.title, poster: item.poster || null, source: item.source || '' });
-    showToast('Agregado a Mi lista');
-  }
-  saveLS('ms_favs', favs);
-  document.querySelectorAll('.fav-btn').forEach(btn => {
-    if (decodeURIComponent(btn.dataset.url) === item.url) btn.classList.toggle('on', isFav(item.url));
-  });
-  notifyListChanged();
   if (detailFavUpdater) detailFavUpdater();
 }
 
 export function toggleFavFromCard(e, btn) {
   e.stopPropagation();
   toggleFav({
-    url: decodeURIComponent(btn.dataset.url),
+    id: btn.dataset.id,
+    type: btn.dataset.type || 'movie',
     title: btn.dataset.title || 'Sin título',
-    poster: btn.dataset.poster || null,
-    source: btn.dataset.source || ''
+    poster: btn.dataset.poster || null
   });
 }
 
+export function toggleFav(item) {
+  const k = itemKey(item);
+  const idx = favs.findIndex(f => itemKey(f) === k);
+  if (idx >= 0) {
+    favs.splice(idx, 1);
+    showToast('Eliminado de favoritos');
+  } else {
+    favs.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null });
+    showToast('Agregado a favoritos');
+  }
+  saveLS('ms_favs', favs);
+  document.querySelectorAll('.fav-btn').forEach(btn => {
+    if (btn.dataset.id === String(item.id) && btn.dataset.type === item.type) btn.classList.toggle('on', isFav(item));
+  });
+  notifyListChanged();
+}
+
+export function toggleWatchLater(item) {
+  const k = itemKey(item);
+  const idx = watchLater.findIndex(w => itemKey(w) === k);
+  if (idx >= 0) {
+    watchLater.splice(idx, 1);
+    showToast('Eliminado de Ver después');
+  } else {
+    watchLater.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null });
+    showToast('Agregado a Ver después');
+  }
+  saveLS('ms_watchlater', watchLater);
+  document.querySelectorAll('.wl-btn').forEach(btn => {
+    if (btn.dataset.id === String(item.id) && btn.dataset.type === item.type) btn.classList.toggle('on', isInWatchLater(item));
+  });
+  notifyListChanged();
+}
+
 export function addHistory(item) {
-  history = history.filter(h => h.url !== item.url);
-  history.unshift({ url: item.url, title: item.title, poster: item.poster || null, source: item.source || '', ts: Date.now() });
+  const k = itemKey(item);
+  history = history.filter(h => itemKey(h) !== k);
+  history.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null, ts: Date.now() });
   if (history.length > 40) history = history.slice(0, 40);
   saveLS('ms_history', history);
   notifyListChanged();
 }
 
 export function updateProgress(item, pos, dur) {
-  if (!item || !item.url || !dur || isNaN(dur) || dur <= 0) return;
-  const entry = history.find(h => h.url === item.url);
+  if (!item?.id || !dur || isNaN(dur) || dur <= 0) return;
+  const k = itemKey(item);
+  const entry = history.find(h => itemKey(h) === k);
   if (!entry) return;
   if (pos >= dur * 0.93 || dur - pos < 20) {
-    delete entry.pos;
-    delete entry.dur;
+    delete entry.posAtl;
+    delete entry.durAt;
   } else {
-    entry.pos = Math.round(pos);
-    entry.dur = Math.round(dur);
+    entry.posAt = Math.round(pos);
+    entry.durAt = Math.round(dur);
   }
-  history = history.filter(h => h.url !== item.url);
-  history.unshift(entry);
   saveLS('ms_history', history);
 }
 
 export function removeFromHistory(e, btn) {
   e.stopPropagation();
-  const url = decodeURIComponent(btn.dataset.url);
-  history = history.filter(h => h.url !== url);
+  const k = `${btn.dataset.type || 'movie'}|${btn.dataset.id}`;
+  history = history.filter(h => itemKey(h) !== k);
   saveLS('ms_history', history);
   notifyListChanged();
   showToast('Eliminado del historial');
 }
 
-export function isInWatchLater(url) {
-  return watchLater.some(w => w.url === url);
-}
-
-export function toggleWatchLater(item) {
-  const idx = watchLater.findIndex(w => w.url === item.url);
-  if (idx >= 0) {
-    watchLater.splice(idx, 1);
-    showToast('Eliminado de Ver después');
-  } else {
-    watchLater.unshift({ url: item.url, title: item.title, poster: item.poster || null, source: item.source || '' });
-    showToast('Agregado a Ver después');
-  }
-  saveLS('ms_watchlater', watchLater);
-  document.querySelectorAll('.wl-btn').forEach(btn => {
-    if (decodeURIComponent(btn.dataset.url) === item.url) btn.classList.toggle('on', isInWatchLater(item.url));
-  });
-  notifyListChanged();
-  if (detailFavUpdater) detailFavUpdater();
-}
-
 export function removeFromWatchLater(e, btn) {
   e.stopPropagation();
-  const url = decodeURIComponent(btn.dataset.url);
-  watchLater = watchLater.filter(w => w.url !== url);
+  const k = `${btn.dataset.type || 'movie'}|${btn.dataset.id}`;
+  watchLater = watchLater.filter(w => itemKey(w) !== k);
   saveLS('ms_watchlater', watchLater);
   notifyListChanged();
   showToast('Eliminado de Ver después');
 }
 
-export function getItemType(url) {
-  const u = url || '';
-  if (/\/anime\//.test(u)) return 'Anime';
-  if (/\/ver-pelicula\/|\/pelicula\//.test(u)) return 'Película';
-  if (/\/ver-serie\/|\/serie\/|\/episodio\/|\/ver-el-episodio\/|\/ver-capitulo\//.test(u)) return 'Serie';
-  return '';
-}
-
 export function cardHtml(item, opts = {}) {
   const title = item.title || 'Sin título';
   const poster = safeImg(item.poster);
-  const fav = isFav(item.url);
-  const typeLabel = getItemType(item.url) || (item.category && item.category !== 'Estrenos' ? item.category : '');
-  const progress = (item.pos && item.dur && item.pos > 0 && item.pos < item.dur * 0.93)
-    ? `<div class="card-progress"><i style="width:${Math.min(100, Math.round(item.pos / item.dur * 100))}%"></i></div>`
+  const typeLabel = item.type === 'tv' ? 'Serie' : 'Película';
+  const progress = (item.posAt && item.durAt && item.posAt > 0 && item.posAt < item.durAt * 0.93)
+    ? `<div class="card-progress"><i style="width:${Math.min(100, Math.round(item.posAt / item.durAt * 100))}%"></i></div>`
     : '';
   return `
-    <div class="video-card" data-url="${encodeURIComponent(item.url || '')}">
-      <button class="fav-btn ${fav ? 'on' : ''}" data-url="${encodeURIComponent(item.url || '')}" data-title="${esc(title)}" data-poster="${esc(poster)}" data-source="${esc(item.source || '')}" onclick="toggleFavFromCard(event, this)" aria-label="Favorito">
+    <div class="video-card" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}">
+      ${opts.deletable ? `<button class="card-del" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}" onclick="${opts.deletable}(event, this)" aria-label="Eliminar">&times;</button>` : ''}
+      <button class="fav-btn ${isFav(item) ? 'on' : ''}" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}" data-title="${esc(title)}" data-poster="${esc(item.poster || '')}" onclick="toggleFavFromCard(event, this)" aria-label="Favorito">
         <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.9-10-9.3C.4 8.6 2.3 5 5.8 5c2 0 3.6 1.1 4.4 2.7h3.6C14.6 6.1 16.2 5 18.2 5c3.5 0 5.4 3.6 3.8 6.7C19.5 16.1 12 21 12 21z"/></svg>
       </button>
-      <img src="${poster}" alt="${esc(title)}" loading="lazy" decoding="async" onerror="this.src='${PLACEHOLDER_SVG}'" />
+      <img src="${poster}" alt="${esc(title)}" loading="lazy" decoding="async" onerror="this.src='${esc(PLACEHOLDER_SVG)}'" />
       <div class="title-overlay">${esc(title)}</div>
-      ${typeLabel ? `<span class="cat-badge">${esc(typeLabel)}</span>` : ''}
-      ${item.source ? `<span class="src-badge sb-${esc((item.source || '').toLowerCase())}">${esc(item.source)}</span>` : ''}
+      <span class="cat-badge">${esc(typeLabel)}</span>
       ${progress}
-      ${opts.deletable ? `<button class="card-del" data-url="${encodeURIComponent(item.url || '')}" onclick="${opts.deletable}(event, this)" aria-label="Eliminar">&times;</button>` : ''}
     </div>
   `;
 }
+
+export function setCurrentDetailItem(item) { currentDetailItem = item; }
+export function getCurrentDetailItem() { return currentDetailItem; }

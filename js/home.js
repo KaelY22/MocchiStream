@@ -1,13 +1,6 @@
 import { API_BASE, esc } from './utils.js';
 import { cardHtml, getHistory } from './catalog.js';
-import { openDetailFromUrl } from './detail.js';
-
-export function sectionSourceBadge(sec) {
-  const sources = [...new Set((sec.items || []).map(it => it.source).filter(Boolean))];
-  const first = sources[0];
-  if (first) return { label: first, cls: first.toLowerCase() };
-  return { label: 'Pelispedia', cls: 'pelispedia' };
-}
+import { openDetailFromId } from './detail.js';
 
 export function loadHome() {
   const home = document.getElementById('homeSections');
@@ -26,12 +19,10 @@ export function loadHome() {
         home.innerHTML = '<p class="empty-msg">No hay contenido disponible.</p>';
         return;
       }
-      home.innerHTML = sections.map(sec => {
-        const badge = sectionSourceBadge(sec);
-        return `
+      home.innerHTML = sections.map(sec => `
         <section class="home-section" data-slug="${esc(sec.slug)}">
           <div class="section-head">
-            <h2 class="section-title">${esc(sec.title)} <span class="section-src-badge sb-${esc(badge.cls)}">${esc(badge.label)}</span></h2>
+            <h2 class="section-title">${esc(sec.title)}</h2>
             <div class="sec-arrows">
               <button class="sec-arrow prev" aria-label="Anterior">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
@@ -112,10 +103,12 @@ function loadSectionMore(sec, gridEl) {
         gridEl.dataset.done = '1';
         return;
       }
-      const existing = new Set([...gridEl.querySelectorAll('.video-card')].map(c => c.dataset.url));
-      const fresh = items.filter(it => !existing.has(encodeURIComponent(it.url || '')));
+      const existing = new Set([...gridEl.querySelectorAll('.video-card')].map(c => `${c.dataset.type}|${c.dataset.id}`));
+      const fresh = items.filter(it => !existing.has(`${it.type}|${it.id}`));
       if (fresh.length) gridEl.insertAdjacentHTML('beforeend', fresh.map(cardHtml).join(''));
     })
     .catch(() => { gridEl.dataset.page = page - 1; })
     .finally(() => { sectionLoading = false; });
 }
+
+export { openDetailFromId };

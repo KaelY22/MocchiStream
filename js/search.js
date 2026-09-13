@@ -1,5 +1,5 @@
 import { API_BASE } from './utils.js';
-import { cardHtml, getItemType } from './catalog.js';
+import { cardHtml } from './catalog.js';
 
 let searchQuery = '';
 let typeFilter = '';
@@ -22,7 +22,7 @@ export function setupFilterChips() {
   container.innerHTML =
     '<button class="chip active" data-type="">Todo</button>' +
     '<button class="chip" data-type="movie">Películas</button>' +
-    '<button class="chip" data-type="series">Series</button>';
+    '<button class="chip" data-type="tv">Series</button>';
   container.querySelectorAll('[data-type]').forEach(chip => {
     chip.addEventListener('click', () => {
       typeFilter = chip.dataset.type;
@@ -33,8 +33,8 @@ export function setupFilterChips() {
 }
 
 function filterByType(items) {
-  if (typeFilter === 'movie') return items.filter(it => getItemType(it.url) === 'Película');
-  if (typeFilter === 'series') return items.filter(it => getItemType(it.url) === 'Serie' || getItemType(it.url) === 'Anime');
+  if (typeFilter === 'movie') return items.filter(it => it.type === 'movie');
+  if (typeFilter === 'tv') return items.filter(it => it.type === 'tv');
   return items;
 }
 

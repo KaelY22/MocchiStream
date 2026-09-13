@@ -1,7 +1,6 @@
 import { API_BASE, esc, showToast } from './utils.js';
-import { addHistory, updateProgress, getHistory } from './catalog.js';
+import { addHistory, updateProgress, getHistory, itemKey } from './catalog.js';
 
-let currentSheetItem = null;
 let pendingTitle = null;
 let hlsInstance = null;
 let controlsTimer = null;
@@ -11,22 +10,12 @@ let currentNextResolver = null;
 let currentNext = null;
 let currentStream = null;
 let downloading = false;
-let sourceCandidates = [];
-let candidateIdx = -1;
-let originalVideoUrl = null;
 let settingsHls = null;
 let currentAudioTrack = -1;
 let currentSubTrack = -1;
 let currentSpeed = 1;
 
-const FAST_HOSTS = /(?:vimeos\.(?:net|zip)|goodstream\.one|hlswish\.com|uqload\.[a-z]+)/i;
-const IFRAME_HOSTS = /(?:vidhidepro\.com|morencius\.com|videoapp\.zip|filelions\.(?:live|online|to)|doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com|vide0\.net|minochinos\.com)/i;
-
 export function initPlayer() {
-  document.getElementById('sourceSheet').addEventListener('click', e => {
-    if (e.target === e.currentTarget || e.target.classList.contains('sheet-handle')) closeSheet();
-  });
-
   const video = document.getElementById('playerVideoBox');
   video.addEventListener('click', toggleControls);
   video.addEventListener('dblclick', toggleFullscreen);
@@ -117,6 +106,11 @@ function showBuffering(on) {
   document.getElementById('playerBuffering').classList.toggle('hidden', !on);
 }
 
+function showLoading(on) {
+  document.getElementById('playerLoading').classList.toggle('hidden', !on);
+  if (on) showControls(false);
+}
+
 function hideEndedBox() {
   document.getElementById('endedBox').classList.add('hidden');
 }
@@ -129,7 +123,7 @@ function saveProgress() {
 
 function onEnded() {
   saveProgress();
-  currentNext = currentNextResolver ? currentNextResolver(currentPlaying ? currentPlaying.url : '') : null;
+  currentNext = currentNextResolver ? currentNextResolver(currentPlaying && currentPlaying._ep ? currentPlaying._ep : null) : null;
   document.getElementById('endedNextBtn').classList.toggle('hidden', !currentNext);
   document.getElementById('endedBox').classList.remove('hidden');
   showControls(true);
@@ -140,20 +134,7 @@ function playNextEpisode() {
   hideEndedBox();
   const nxt = currentNext;
   currentNext = null;
-  fetch(`${API_BASE}/links?url=${encodeURIComponent(nxt.link)}`)
-    .then(res => res.json())
-    .then(links => {
-      if (!links || !links.length) {
-        showToast('Este capítulo no tiene fuentes todavía.', true);
-        closeFullPlayer();
-        return;
-      }
-      const sorted = links.slice().sort((a, b) => (FAST_HOSTS.test(a) ? 0 : 1) - (FAST_HOSTS.test(b) ? 0 : 1));
-      startPlayback(nxt.link, nxt.title, currentPlaying ? currentPlaying.poster : null, sorted[0], sorted);
-    })
-    .catch(() => {
-      showToast('Error al cargar el siguiente capítulo.', true);
-    });
+  if (currentPlaying) playItem(currentPlaying, nxt, currentNextResolver);
 }
 
 function proxyUrl(url, ref) {
@@ -251,30 +232,43 @@ function playIframe(videoUrl, title) {
   document.getElementById('ctrlDownload').classList.add('hidden');
   currentStream = null;
   iframe.src = videoUrl;
-  showPlayer(title, 'Fuente externa');
+  showPlayer(title, 'Fuente externa · con anuncios');
 }
 
-function tryNextFastSource(title, resumeAt, reason) {
-  while (candidateIdx + 1 < sourceCandidates.length) {
-    candidateIdx++;
-    const next = sourceCandidates[candidateIdx];
-    if (!FAST_HOSTS.test(next)) break;
-    showToast(`Fuente agotada (${reason}). Probando la siguiente sin anuncios...`, false);
-    fetchStream(next)
-      .then(res => res.json())
-      .then(s => {
-        if (s && s.ok) {
-          s.sourceUrl = next;
-          playOwnPlayer(s, title, resumeAt);
-        } else {
-          tryNextFastSource(title, resumeAt, 'sin player disponible');
-        }
-      })
-      .catch(() => tryNextFastSource(title, resumeAt, 'error de red'));
-    return;
-  }
-  showToast(`Player propio falló (${reason}). Abriendo la externa...`, true);
-  playIframe(originalVideoUrl || (sourceCandidates[candidateIdx] || ''), title);
+export function playItem(item, ep, nextResolver) {
+  const title = ep ? `${item.title} — Cap ${ep.episode}` : item.title;
+  addHistory({ id: item.id, type: item.type, title: item.title, poster: item.poster });
+  currentPlaying = { id: item.id, type: item.type, title: item.title, poster: item.poster || null, url: itemKey(item), _ep: ep || null };
+  currentNextResolver = nextResolver || null;
+  currentNext = null;
+  hideEndedBox();
+  hideSettingsPanel();
+  showLoading(true);
+  showPlayer(title, item.type === 'tv' ? 'Serie' : 'Película');
+  const h = getHistory().find(e => itemKey(e) === itemKey(item));
+  const resumeAt = (h && h.posAt && h.durAt && h.posAt > 10 && h.posAt < h.durAt * 0.93) ? h.posAt : 0;
+  const params = new URLSearchParams({ title: item.title, type: item.type });
+  if (item.year) params.set('year', item.year);
+  if (ep) { params.set('season', ep.season); params.set('episode', ep.episode); }
+  if (item.anime) params.set('anime', '1');
+  fetch(`${API_BASE}/play?${params}`)
+    .then(res => res.json())
+    .then(data => {
+      showLoading(false);
+      if (data && data.ok && data.url) {
+        playOwnPlayer(data, title, resumeAt);
+      } else if (data && data.iframe) {
+        playIframe(data.iframe, title);
+      } else {
+        showToast('No se encontró una fuente sin anuncios para este título.', true);
+        closeFullPlayer();
+      }
+    })
+    .catch(() => {
+      showLoading(false);
+      showToast('Error al buscar la fuente.', true);
+      closeFullPlayer();
+    });
 }
 
 function playOwnPlayer(stream, title, resumeAt) {
@@ -289,23 +283,28 @@ function playOwnPlayer(stream, title, resumeAt) {
   const onError = (reason) => {
     if (stream.retried) {
       destroyOwnPlayer();
-      tryNextFastSource(title, resumeAt, reason);
+      showToast(`La fuente falló (${reason}). Prueba con otro título o más tarde.`, true);
+      closeFullPlayer();
     } else {
       stream.retried = true;
       destroyOwnPlayer();
       showToast('Reintentando la fuente con un token nuevo...', false);
-      fetchStream(stream.sourceUrl)
+      fetchStream(stream.sourceUrl || stream.url)
         .then(res => res.json())
         .then(s => {
           if (s && s.ok) {
-            s.sourceUrl = stream.sourceUrl;
+            s.sourceUrl = stream.sourceUrl || stream.url;
             s.retried = true;
             playOwnPlayer(s, title, resumeAt);
           } else {
-            tryNextFastSource(title, resumeAt, 'reintento no ok');
+            showToast('La fuente falló. Prueba con otro título o más tarde.', true);
+            closeFullPlayer();
           }
         })
-        .catch(() => tryNextFastSource(title, resumeAt, 'reintento error'));
+        .catch(() => {
+          showToast('Error de red al reintentar.', true);
+          closeFullPlayer();
+        });
     }
   };
 
@@ -469,44 +468,17 @@ async function downloadCurrent() {
   }
 }
 
-export function openFullPlayerExternal(title, videoUrl) {
-  const finalTitle = pendingTitle || title || 'Sin título';
-  pendingTitle = null;
-  hideEndedBox();
-  showBuffering(false);
-  const h = currentPlaying ? getHistory().find(e => e.url === currentPlaying.url) : null;
-  const resumeAt = (h && h.pos && h.dur && h.pos > 10 && h.pos < h.dur * 0.93) ? h.pos : 0;
-  fetchStream(videoUrl)
-    .then(res => res.json())
-    .then(stream => {
-      if (stream && stream.ok) {
-        stream.sourceUrl = videoUrl;
-        playOwnPlayer(stream, finalTitle, resumeAt);
-      } else {
-        playIframe(videoUrl, finalTitle);
-      }
-    })
-    .catch(() => playIframe(videoUrl, finalTitle));
-}
-
-export function closeSheet() {
-  document.getElementById('sourceSheet').classList.add('hidden');
-  document.getElementById('sheetList').innerHTML = '';
-}
-
 export function closeFullPlayer() {
   saveProgress();
   destroyOwnPlayer();
   hideEndedBox();
   hideSettingsPanel();
   showBuffering(false);
+  showLoading(false);
   currentPlaying = null;
   currentNextResolver = null;
   currentNext = null;
   currentStream = null;
-  sourceCandidates = [];
-  candidateIdx = -1;
-  originalVideoUrl = null;
   settingsHls = null;
   currentAudioTrack = -1;
   currentSubTrack = -1;
@@ -516,66 +488,6 @@ export function closeFullPlayer() {
   const iframe = document.getElementById('playerIframe');
   if (iframe) iframe.src = '';
   document.body.style.overflow = 'auto';
-}
-
-export function openSheet(url, title, poster, nextResolver) {
-  currentSheetItem = { url, title: title || 'Contenido', poster: poster || null };
-  currentNextResolver = nextResolver || null;
-  currentNext = null;
-  document.getElementById('sheetTitle').textContent = 'Seleccionar fuente';
-  document.getElementById('sheetSub').textContent = title || '';
-  const list = document.getElementById('sheetList');
-  list.innerHTML = '<div class="hint"><span class="spinner"></span>Cargando fuentes...</div>';
-  document.getElementById('sourceSheet').classList.remove('hidden');
-  fetch(`${API_BASE}/links?url=${encodeURIComponent(url)}`)
-    .then(res => res.json())
-    .then(links => {
-      if (!links || links.length === 0) {
-        list.innerHTML = '<p class="error">No se encontraron fuentes de video.</p>';
-        return;
-      }
-      const sorted = links.slice().sort((a, b) => {
-        const fa = FAST_HOSTS.test(a) ? 0 : 1;
-        const fb = FAST_HOSTS.test(b) ? 0 : 1;
-        return fa - fb;
-      });
-      list.innerHTML = sorted.map(link => {
-        try {
-          const hostname = new URL(link).hostname;
-          let extra = '';
-          if (FAST_HOSTS.test(link)) extra = ' <span class="tag tag-fast">⚡ Sin anuncios</span>';
-          else if (IFRAME_HOSTS.test(link)) extra = ' <span class="tag tag-ext">Con Anuncios</span>';
-          else if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) extra = ' <span class="tag tag-trailer">Trailer</span>';
-          else extra = ' <span class="tag tag-ext">Con Anuncios</span>';
-          return `
-            <button class="source-btn" data-url="${esc(link)}">
-              <span class="source-icon">
-                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              </span>
-              <span class="source-name">${esc(hostname)}</span>${extra}
-            </button>`;
-        } catch (e) { return ''; }
-      }).join('');
-      list.querySelectorAll('.source-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const selectedUrl = btn.dataset.url;
-          startPlayback(url, currentSheetItem.title, currentSheetItem.poster, selectedUrl, sorted);
-        });
-      });
-    })
-    .catch(() => {
-      list.innerHTML = '<p class="error">Error al cargar fuentes.</p>';
-    });
-}
-
-function startPlayback(url, title, poster, videoUrl, candidates) {
-  addHistory({ url, title, poster: poster || null, source: '' });
-  currentPlaying = { url, title, poster: poster || null };
-  sourceCandidates = candidates || [];
-  candidateIdx = sourceCandidates.indexOf(videoUrl);
-  originalVideoUrl = videoUrl;
-  closeSheet();
-  openFullPlayerExternal(title, videoUrl);
 }
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];

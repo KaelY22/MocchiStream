@@ -1,4 +1,4 @@
-const CACHE = 'mocchi-v29';
+const CACHE = 'mocchi-v30';
 const ASSETS = [
   '/',
   '/index.html',
@@ -11,7 +11,6 @@ const ASSETS = [
   '/js/catalog.js',
   '/js/home.js',
   '/js/search.js',
-  '/js/categories.js',
   '/js/library.js',
   '/js/detail.js',
   '/js/player.js',
