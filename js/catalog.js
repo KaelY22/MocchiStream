@@ -61,7 +61,7 @@ async function migrateLegacyLists() {
   notifyListChanged();
 }
 
-function itemKey(item) {
+export function itemKey(item) {
   return `${item?.type || 'movie'}|${item?.id}`;
 }
 
