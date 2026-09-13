@@ -10,7 +10,7 @@ let currentDetailItem = null;
 const KEEP_RE = /pelispedia\./i;
 
 function cleanStale(list) {
-  return (list || []).filter(i => KEEP_RE.test(i.url || ''));
+  return (list || []).filter(i => (i && i.id) || KEEP_RE.test(i.url || ''));
 }
 
 export function loadLists() {
@@ -144,7 +144,7 @@ export function updateProgress(item, pos, dur) {
   const entry = history.find(h => itemKey(h) === k);
   if (!entry) return;
   if (pos >= dur * 0.93 || dur - pos < 20) {
-    delete entry.posAtl;
+    delete entry.posAt;
     delete entry.durAt;
   } else {
     entry.posAt = Math.round(pos);

@@ -167,6 +167,24 @@ async function mapLimit(arr, limit, fn) {
   return out;
 }
 
+function firstSuccess(promises) {
+  return new Promise(resolve => {
+    let done = false;
+    let pending = promises.length;
+    if (!pending) return resolve(null);
+    for (const p of promises) {
+      p.then(r => {
+        if (done) return;
+        if (r) { done = true; resolve(r); }
+        else if (--pending === 0) resolve(null);
+      }).catch(() => {
+        if (done) return;
+        if (--pending === 0) resolve(null);
+      });
+    }
+  });
+}
+
 const adminAttempts = new Map();
 function adminRateLimited(ip) {
   const now = Date.now();
@@ -536,6 +554,16 @@ function pelispediaEmbeds(html) {
     .filter(u => /^https?:/.test(u));
 }
 
+function pelispediaEpisodeLinks(html) {
+  const links = [];
+  const re = /href="([^"]*\/capitulo\/[^"]*?temporada-(\d+)-capitulo-(\d+)[^"]*)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    links.push({ url: m[1], season: parseInt(m[2]), episode: parseInt(m[3]) });
+  }
+  return links;
+}
+
 function extractMonoschinosItems(html) {
   const items = [];
   const re = /<article>([\s\S]*?)<\/article>/gi;
@@ -562,6 +590,16 @@ function monoschinosEmbeds(html) {
       } catch (e) { return ''; }
     })
     .filter(u => /^https?:/.test(u));
+}
+
+function monoschinosEpisodeLinks(html) {
+  const links = [];
+  const re = /href="([^"]*\/ver\/[^"]*?episodio-(\d+)[^"]*)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    links.push({ url: m[1], season: 1, episode: parseInt(m[2]) });
+  }
+  return links;
 }
 
 function extractLatanimeItems(html) {
@@ -595,7 +633,7 @@ const SITES = {
   movies: [
     {
       name: 'Cinecalidad',
-      searchUrl: q => `https://www.cinecalidad.am/?s=${encodeURIComponent(q)}`,
+      searchUrl: q => `https://www.cinecalidad.ec/?s=${encodeURIComponent(q)}`,
       parse: extractCinecalidadItems,
       embeds: cinecalidadEmbeds,
       episodeLinks: cinecalidadEpisodeLinks,
@@ -606,10 +644,8 @@ const SITES = {
       searchUrl: q => `https://pelispedia.is/?s=${encodeURIComponent(q)}`,
       parse: extractPelispediaItems,
       embeds: pelispediaEmbeds,
-      episodeUrl: (base, season, episode) => {
-        const slug = base.replace(/\/+$/, '').split('/').pop();
-        return `https://pelispedia.is/temporada/${season}/capitulo/${episode}/`;
-      },
+      episodeLinks: pelispediaEpisodeLinks,
+      episodeUrl: (base) => base,
       hasEpisodes: true,
     },
     {
@@ -617,10 +653,8 @@ const SITES = {
       searchUrl: q => `https://www3.seriesmetro.net/?s=${encodeURIComponent(q)}`,
       parse: extractPelispediaItems,
       embeds: pelispediaEmbeds,
-      episodeUrl: (base, season, episode) => {
-        const slug = base.replace(/\/+$/, '').split('/').pop();
-        return `https://www3.seriesmetro.net/temporada/${season}/capitulo/${episode}/`;
-      },
+      episodeLinks: pelispediaEpisodeLinks,
+      episodeUrl: (base) => base,
       hasEpisodes: true,
     },
   ],
@@ -630,10 +664,8 @@ const SITES = {
       searchUrl: q => `https://monoschinos.st/buscar?q=${encodeURIComponent(q)}`,
       parse: extractMonoschinosItems,
       embeds: monoschinosEmbeds,
-      episodeUrl: (base, season, episode) => {
-        const slug = base.replace(/\/+$/, '').split('/').pop();
-        return `https://monoschinos.st/ver/${slug}-episodio-${episode}`;
-      },
+      episodeLinks: monoschinosEpisodeLinks,
+      episodeUrl: (base) => base,
       hasEpisodes: true,
     },
     {
@@ -663,8 +695,9 @@ async function resolveEmbed(embedUrl, deadline) {
   if (Date.now() > deadline) return null;
   if (!assertSafeUrl(embedUrl, STREAM_ALLOWED_HOSTS)) return null;
   const hostResult = await tryHostExtractors(embedUrl);
-  if (hostResult && (await verifyStream(hostResult))) {
-    return { ...hostResult, sourceUrl: embedUrl };
+  if (hostResult) {
+    const verified = await verifyWithVimeosRewrite(hostResult);
+    if (verified) return { ...verified, sourceUrl: embedUrl };
   }
   if (Date.now() > deadline) return null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -673,50 +706,47 @@ async function resolveEmbed(embedUrl, deadline) {
     try {
       result = await extractOnce(embedUrl, deadline);
     } catch (e) {}
-    if (result && (await verifyStream(result))) {
-      return { ...result, sourceUrl: embedUrl };
+    if (result) {
+      const verified = await verifyWithVimeosRewrite(result);
+      if (verified) return { ...verified, sourceUrl: embedUrl };
     }
   }
   return null;
 }
 
-async function trySite(site, query, season, episode, deadline) {
-  if (Date.now() > deadline) return { fast: null, iframe: null };
+async function trySite(site, query, queryBase, season, episode, deadline, type) {
   let items = [];
   try {
-    const html = await fetchHTML(site.searchUrl(query), 8000);
+    const html = await fetchHTML(site.searchUrl(query), 5000);
     items = site.parse(html);
   } catch (e) {
-    return { fast: null, iframe: null };
+    return [];
   }
-  const q = normTitle(query);
-  const match = items.find(it => normTitle(it.title) === q)
-    || items.find(it => normTitle(it.title).includes(q) || q.includes(normTitle(it.title)));
-  if (!match) return { fast: null, iframe: null };
+  if (!items.length && queryBase && queryBase !== query && Date.now() < deadline) {
+    try {
+      const html = await fetchHTML(site.searchUrl(queryBase), 5000);
+      items = site.parse(html);
+    } catch (e) {}
+  }
+  if (!items.length) return [];
+  const q = normTitle(queryBase || query);
+  const sameType = items.filter(it => it.type === type);
+  const bestOf = list => list.sort((a, b) => normTitle(b.title).length - normTitle(a.title).length)[0];
+  const match = sameType.find(it => normTitle(it.title) === q)
+    || bestOf(sameType.filter(it => normTitle(it.title).includes(q) || q.includes(normTitle(it.title))));
+  if (!match || Date.now() > deadline) return [];
 
   let embeds = [];
   try {
     let target = pickEpisodeUrl(site, match, season, episode);
-    let html = await fetchHTML(target, 8000);
+    let html = await fetchHTML(target, 5000);
     if (season && episode && site.episodeLinks) {
       const ep = site.episodeLinks(html).find(l => l.season === season && l.episode === episode);
-      if (ep) html = await fetchHTML(ep.url, 8000);
+      if (ep) html = await fetchHTML(ep.url, 5000);
     }
     embeds = site.embeds(html);
-  } catch (e) {
-    return { fast: null, iframe: null };
-  }
-  if (!embeds.length) return { fast: null, iframe: null };
-
-  const sorted = sortEmbeds(embeds);
-  const firstIframe = sorted.find(u => fastRank(u) === -1) || null;
-  for (const u of sorted) {
-    if (fastRank(u) === -1) break;
-    const result = await resolveEmbed(u, deadline);
-    if (result) return { fast: result, iframe: null };
-    if (Date.now() > deadline) break;
-  }
-  return { fast: null, iframe: firstIframe };
+  } catch (e) {}
+  return embeds;
 }
 
 async function handlePlay(url, env, corsHeaders) {
@@ -728,23 +758,35 @@ async function handlePlay(url, env, corsHeaders) {
   const anime = url.searchParams.get('anime') === '1';
   if (!title) return jsonResponse({ error: 'Missing title' }, corsHeaders, 400);
 
-  const sites = anime ? SITES.anime : SITES.movies;
-  const deadline = Date.now() + (season ? 16000 : 12000);
-  const query = year ? `${title} ${year}` : title;
+  const cacheKey = 'play/v1/' + (anime ? 'anime' : type) + '/' + encodeURIComponent(normTitle(title)) + '/' + (season || 0) + '/' + (episode || 0);
+  const hit = await cacheGet(cacheKey);
+  if (hit) {
+    const cached = await hit.json();
+    if (cached && cached.ok && cached.url) {
+      return jsonResponse(cached, corsHeaders);
+    }
+  }
 
-  let fallbackIframe = null;
-  const results = await mapLimit(sites, sites.length, async site => {
-    const r = await trySite(site, query, season, episode, deadline);
-    if (r.iframe && !fallbackIframe) fallbackIframe = r.iframe;
-    return r.fast;
-  });
-  const winner = results.find(Boolean);
+  const sites = anime ? SITES.anime : SITES.movies;
+  const deadline = Date.now() + (season ? 22000 : 18000);
+  const query = year ? `${title} ${year}` : title;
+  const queryBase = title;
+
+  const embedsList = await mapLimit(sites, sites.length, site => trySite(site, query, queryBase, season, episode, deadline, type));
+  const embeds = embedsList.flat();
+  const sorted = sortEmbeds(embeds);
+  const firstIframe = sorted.find(u => fastRank(u) === -1) || null;
+  const fasts = sorted.filter(u => fastRank(u) !== -1).slice(0, 6);
+
+  const timeout = ms => new Promise(r => setTimeout(r, ms));
+  const winner = await firstSuccess(fasts.map(u =>
+    Promise.race([resolveEmbed(u, deadline), timeout(8000).then(() => null)])
+  ));
   if (winner) {
+    await cachePut(cacheKey, { ok: true, ...winner }, 600, corsHeaders, env);
     return jsonResponse({ ok: true, ...winner }, corsHeaders);
   }
-  if (fallbackIframe) {
-    return jsonResponse({ ok: false, iframe: fallbackIframe }, corsHeaders);
-  }
+  if (firstIframe) return jsonResponse({ ok: false, iframe: firstIframe }, corsHeaders);
   return jsonResponse({ ok: false }, corsHeaders);
 }
 
@@ -779,7 +821,7 @@ async function fetchFollow(url, timeout = 8000) {
     });
     clearTimeout(timer);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return { url: response.url, text: await response.text() };
+    return { url: response.url, text: await response.text(), headers: response.headers };
   } catch (err) {
     clearTimeout(timer);
     throw err;
@@ -788,15 +830,15 @@ async function fetchFollow(url, timeout = 8000) {
 
 async function extractDoodstream(url) {
   const embedUrl = url.replace('/d/', '/e/');
-  const { url: finalUrl, text: html } = await fetchFollow(embedUrl, STREAM_TIMEOUT);
+  const { url: finalUrl, text: html, headers: embedHeaders } = await fetchFollow(embedUrl, STREAM_TIMEOUT);
   const host = new URL(finalUrl).origin;
   const md5Match = html.match(/\/pass_md5\/([0-9a-zA-Z]+)/);
   if (!md5Match) return null;
   const md5Url = host + '/pass_md5/' + md5Match[1];
-  const res = await fetch(md5Url, {
-    headers: { 'User-Agent': USER_AGENT, 'Referer': finalUrl },
-    redirect: 'follow'
-  });
+  const reqHeaders = { 'User-Agent': USER_AGENT, 'Referer': finalUrl };
+  const cookie = embedHeaders ? embedHeaders.get('set-cookie') : null;
+  if (cookie) reqHeaders['Cookie'] = cookie;
+  const res = await fetch(md5Url, { headers: reqHeaders, redirect: 'follow' });
   if (!res.ok) return null;
   const videoUrl = (await res.text()).trim();
   if (!videoUrl.startsWith('http')) return null;
@@ -1023,6 +1065,19 @@ async function verifyStream(result) {
   }
 }
 
+async function verifyWithVimeosRewrite(result) {
+  if (await verifyStream(result)) return result;
+  try {
+    const u = new URL(result.url);
+    if (/\.vimeos\.(?:net|zip)$/i.test(u.hostname) && u.hostname !== 'p3.vimeos.zip') {
+      u.hostname = 'p3.vimeos.zip';
+      const alt = { ...result, url: u.href };
+      if (await verifyStream(alt)) return alt;
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function handleStreamResolve(targetUrl, corsHeaders, env) {
   try {
     if (!assertSafeUrl(targetUrl, STREAM_ALLOWED_HOSTS)) {
@@ -1042,8 +1097,9 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
     }
     const hostResult = await tryHostExtractors(targetUrl);
     if (hostResult) {
-      if (await verifyStream(hostResult)) {
-        return cachePut(cacheKey, { ok: true, ...hostResult }, 300, corsHeaders, env);
+      const verified = await verifyWithVimeosRewrite(hostResult);
+      if (verified) {
+        return cachePut(cacheKey, { ok: true, ...verified }, 300, corsHeaders, env);
       }
       return jsonResponse({ ok: false }, corsHeaders);
     }
@@ -1054,8 +1110,11 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
       try {
         result = await extractOnce(targetUrl, deadline);
       } catch (e) {}
-      if (result && (await verifyStream(result))) {
-        return cachePut(cacheKey, { ok: true, ...result }, 300, corsHeaders, env);
+      if (result) {
+        const verified = await verifyWithVimeosRewrite(result);
+        if (verified) {
+          return cachePut(cacheKey, { ok: true, ...verified }, 300, corsHeaders, env);
+        }
       }
       if (attempt < 3 && Date.now() < deadline) await new Promise(r => setTimeout(r, 500));
     }
