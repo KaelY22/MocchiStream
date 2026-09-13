@@ -1,9 +1,42 @@
 import { API_BASE, esc, showToast, safeImg } from './utils.js';
 import { isFav, toggleFav, isInWatchLater, toggleWatchLater, setDetailFavUpdater, itemKey } from './catalog.js';
 import { playItem } from './player.js';
+import { navigate } from './router.js';
 
 let currentDetail = null;
 let detailSeason = 1;
+
+export function fetchItem(id, type) {
+  return fetch(`${API_BASE}/details?id=${encodeURIComponent(id)}&type=${encodeURIComponent(type || 'movie')}`)
+    .then(res => res.json())
+    .then(details => {
+      if (!details || !details.id) throw new Error('sin datos');
+      return {
+        id: details.id,
+        type: details.type || type || 'movie',
+        title: details.title || 'Sin título',
+        poster: details.poster || null,
+        backdrop: details.backdrop || null,
+        overview: details.overview || '',
+        genres: details.genres || [],
+        year: details.year || null,
+        score: details.score || null,
+        anime: !!details.anime,
+        episodes: details.episodes || []
+      };
+    });
+}
+
+export function nextEpisodeResolver(item) {
+  if (item.type !== 'tv') return null;
+  const epsAll = (item.episodes || []).slice().sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
+  return (currentEp) => {
+    const idx = epsAll.findIndex(e => e.season === currentEp.season && e.episode === currentEp.episode);
+    const nxt = idx >= 0 ? epsAll[idx + 1] : null;
+    if (!nxt) return null;
+    return { season: nxt.season, episode: nxt.episode, title: `${item.title} — Cap ${nxt.episode}` };
+  };
+}
 
 export function initDetail() {
   setDetailFavUpdater(updateDetailFavBtn);
@@ -16,24 +49,8 @@ export function initDetail() {
 }
 
 export function openDetailFromId(id, type) {
-  fetch(`${API_BASE}/details?id=${encodeURIComponent(id)}&type=${encodeURIComponent(type || 'movie')}`)
-    .then(res => res.json())
-    .then(details => {
-      if (!details || !details.id) throw new Error('sin datos');
-      openDetail({
-        id: details.id,
-        type: details.type || type || 'movie',
-        title: details.title || 'Sin título',
-        poster: details.poster || null,
-        backdrop: details.backdrop || null,
-        overview: details.overview || '',
-        genres: details.genres || [],
-        year: details.year || null,
-        score: details.score || null,
-        anime: !!details.anime,
-        episodes: details.episodes || []
-      });
-    })
+  fetchItem(id, type)
+    .then(item => openDetail(item))
     .catch(() => {
       showToast('No se pudo cargar el título.', true);
     });
@@ -43,15 +60,7 @@ export function openDetail(item, season) {
   currentDetail = item;
   const seasons = [...new Set((item.episodes || []).map(e => e.season).filter(n => n !== null && n !== undefined))].sort((a, b) => a - b);
   detailSeason = season || seasons[0] || 1;
-  const epsAll = (item.episodes || []).slice().sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
-  const nextResolver = item.type === 'tv'
-    ? (currentEp) => {
-        const idx = epsAll.findIndex(e => e.season === currentEp.season && e.episode === currentEp.episode);
-        const nxt = idx >= 0 ? epsAll[idx + 1] : null;
-        if (!nxt) return null;
-        return { season: nxt.season, episode: nxt.episode, title: `${item.title} — Cap ${nxt.episode}` };
-      }
-    : null;
+  const nextResolver = nextEpisodeResolver(item);
 
   const backdrop = document.getElementById('detailBackdrop');
   backdrop.style.backgroundImage = (item.backdrop || item.poster) ? `url(${item.backdrop || item.poster})` : '';
@@ -109,6 +118,7 @@ export function openDetail(item, season) {
   view._ot = setTimeout(() => view.classList.remove('opening'), 1400);
   document.body.style.overflow = 'hidden';
   document.getElementById('detailView').scrollTop = 0;
+  navigate(`/titulo/${encodeURIComponent(item.id)}/${item.type}`);
 }
 
 function renderEps(eps, item) {
@@ -147,4 +157,5 @@ export function closeDetail() {
     document.body.style.overflow = 'auto';
     currentDetail = null;
   }, 160);
+  if (location.pathname.startsWith('/titulo/')) history.back();
 }

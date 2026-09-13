@@ -1,4 +1,4 @@
-const CACHE = 'mocchi-v32';
+const CACHE = 'mocchi-v33';
 const ASSETS = [
   '/',
   '/index.html',
@@ -17,6 +17,7 @@ const ASSETS = [
   '/js/hls.min.js',
   '/js/StreamSaver.js',
   '/js/app.js',
+  '/js/router.js',
   '/js/admin.js',
   '/saver/mitm.html',
   '/saver/sw.js',

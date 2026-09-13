@@ -3,8 +3,9 @@ import { loadLists, toggleFavFromCard, removeFromHistory, removeFromWatchLater }
 import { loadHome, renderContinueRow } from './home.js';
 import { setupSearch, setupFilterChips } from './search.js';
 import { setupLibrary, renderLibrary } from './library.js';
-import { openDetailFromId, initDetail, closeDetail } from './detail.js';
-import { initPlayer, closeFullPlayer } from './player.js';
+import { openDetailFromId, initDetail, closeDetail, fetchItem, nextEpisodeResolver } from './detail.js';
+import { initPlayer, closeFullPlayer, playItem } from './player.js';
+import { navigate, parseRoute } from './router.js';
 
 let deferredInstall = null;
 
@@ -25,12 +26,37 @@ document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(location.search);
   const deepId = params.get('t');
   const deepType = params.get('type') || 'movie';
-  if (deepId) setTimeout(() => openDetailFromId(deepId, deepType), 400);
+  if (deepId) navigate(`/titulo/${encodeURIComponent(deepId)}/${encodeURIComponent(deepType)}`);
   document.addEventListener('click', e => {
     const card = e.target.closest('.video-card');
     if (card) openDetailFromId(card.dataset.id, card.dataset.type);
   });
+  window.addEventListener('popstate', handleRoute);
+  handleRoute();
 });
+
+const NAV_ROUTES = { explore: '/', search: '/buscar', library: '/guardados', profile: '/perfil' };
+
+function handleRoute() {
+  const route = parseRoute();
+  if (route.name === 'detail') {
+    const dv = document.getElementById('detailView');
+    if (dv.classList.contains('hidden')) openDetailFromId(route.id, route.type);
+  } else if (route.name === 'play') {
+    const fp = document.getElementById('fullPlayer');
+    if (!fp.classList.contains('hidden')) return;
+    fetchItem(route.id, route.type)
+      .then(item => {
+        const ep = route.season ? { season: route.season, episode: route.episode } : null;
+        playItem(item, ep, nextEpisodeResolver(item));
+      })
+      .catch(() => showToast('No se pudo cargar el título.', true));
+  } else {
+    closeDetail();
+    closeFullPlayer();
+    showView(route.name);
+  }
+}
 
 function showView(name) {
   document.querySelectorAll('.app-view').forEach(v => v.classList.add('hidden'));
@@ -51,7 +77,7 @@ function showView(name) {
 
 function setupNav() {
   document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => showView(item.dataset.view));
+    item.addEventListener('click', () => navigate(NAV_ROUTES[item.dataset.view]));
   });
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.add('hidden'); });
@@ -98,7 +124,7 @@ function shareTitle() {
   const type = btn.dataset.type;
   const title = btn.dataset.title;
   if (!id) return;
-  const link = `${location.origin}/?t=${encodeURIComponent(id)}&type=${encodeURIComponent(type || 'movie')}`;
+  const link = `${location.origin}/titulo/${encodeURIComponent(id)}/${encodeURIComponent(type || 'movie')}`;
   const text = `${title} — Míralo en MocchiStream`;
   if (navigator.share) {
     navigator.share({ title, text, url: link }).catch(() => {});

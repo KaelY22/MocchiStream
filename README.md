@@ -18,7 +18,7 @@ MocchiStream agrega contenido de **Pelispedia** (proveedor único), lo organiza 
 - **Búsqueda universal** con acentos normalizados y filtros por tipo.
 - **Reproductor propio sin anuncios** para las fuentes compatibles (HLS vía worker) con fallback a iframe.
 - **Detalle full-screen**: póster, sinopsis, temporadas con pestañas, episodios clicables y compartir.
-- **Mi lista**: Favoritos, Historial (máx. 40) y Ver después.
+- **Guardados**: Favoritos, Historial (máx. 40) y Ver después.
 - **PWA instalable** + pull-to-refresh en la portada.
 - **Descarga por capítulo** cuando el administrador la define; episodios solo-descarga sin streaming.
 - **Panel de administración privado**: categorías personalizadas, catálogo, perfil y enlaces de descarga por capítulo.

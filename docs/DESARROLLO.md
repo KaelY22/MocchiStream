@@ -62,7 +62,7 @@ MocchiStream/
 - **Búsqueda universal** con acentos normalizados, filtros por tipo (Todo/Películas/Series)
 - **Detalle full-screen**: póster, sinopsis, temporadas con pestañas, episodios clicables, compartir (`navigator.share` + deep link `?t=`)
 - **Sheet de fuentes** inferior con tags: `⚡ Sin anuncios` (player propio), `Externa` (va a iframe), `Trailer`, `recomendada`
-- **Mi lista**: Favoritos / Historial (máx 40) / Ver después (`ms_watchlater`)
+- **Guardados**: Favoritos / Historial (máx 40) / Ver después (`ms_watchlater`)
 - **PWA instalable** + botón "Instalar app" + **pull-to-refresh** en portada
 - Descarga por capítulo cuando el admin la define; capítulos "solo descarga" sin streaming
 - Cards con badge de tipo (Película/Serie/Anime) y badge de fuente

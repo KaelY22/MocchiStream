@@ -1,5 +1,6 @@
 import { API_BASE, esc, showToast } from './utils.js';
 import { addHistory, updateProgress, getHistory, itemKey } from './catalog.js';
+import { navigate } from './router.js';
 
 let pendingTitle = null;
 let hlsInstance = null;
@@ -245,6 +246,7 @@ export function playItem(item, ep, nextResolver) {
   hideSettingsPanel();
   showLoading(true);
   showPlayer(title, item.type === 'tv' ? 'Serie' : 'Película');
+  navigate(`/ver/${encodeURIComponent(item.id)}/${item.type}${ep ? `/${ep.season}/${ep.episode}` : ''}`);
   const h = getHistory().find(e => itemKey(e) === itemKey(item));
   const resumeAt = (h && h.posAt && h.durAt && h.posAt > 10 && h.posAt < h.durAt * 0.93) ? h.posAt : 0;
   const params = new URLSearchParams({ title: item.title, type: item.type });
@@ -488,6 +490,7 @@ export function closeFullPlayer() {
   const iframe = document.getElementById('playerIframe');
   if (iframe) iframe.src = '';
   document.body.style.overflow = 'auto';
+  if (location.pathname.startsWith('/ver/')) history.back();
 }
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
