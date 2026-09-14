@@ -29,27 +29,41 @@ Web app de streaming con **proveedor único: Pelispedia**. Busca, ve portada por
 
 ```
 MocchiStream/
-├── index.html            → SPA (Selecciones + 5 vistas)
+├── index.html            → MPA: Explorar (secciones + scroll infinito)
+├── buscar.html           → Resultados de búsqueda (?q=)
+├── categorias.html       → Categorías (?cat=peliculas|series|anime|kdrama)
+├── favoritos.html        → Favoritos
+├── ver-despues.html      → Ver después
+├── historial.html        → Historial
+├── playlist.html         → Playlists (próximamente)
+├── detalle.html          → Detalle full-screen (?id=&type=)
+├── ver.html              → Reproductor (?id=&season=&episode=)
 ├── admin.html            → Panel privado (/admin, redirect 308)
 ├── manifest.webmanifest  → PWA (standalone)
-├── sw.js                 → Service worker (CACHE=mocchi-v29)
+├── sw.js                 → Service worker (CACHE=mocchi-v35)
 ├── css/
-│   ├── style.css         → Diseño Apple HIG oscuro (tokens, glass solo en capa funcional)
+│   ├── style.css         → Diseño oscuro + tema claro (tokens, glass solo en capa funcional)
 │   ├── fonts-material.css
 │   └── fonts/            → inter-var.woff2 + material-symbols (subset)
-├── icons/                → icon-192.png, icon-512.png
+├── icons/                → icon-192.png, icon-512.png, profile.png (logo)
 ├── js/
-│   ├── utils.js          → API_BASE, STORAGE_VERSION (v5), esc, showToast, loadLS/saveLS
-│   ├── catalog.js        → favs/history/watchLater, cardHtml, getItemType, cleanStale (solo Pelispedia)
-│   ├── home.js           → Selecciones/Explorar, secciones, scroll infinito
-│   ├── search.js         → búsqueda con debounce, filtros por tipo
-│   ├── categories.js     → tiles de categorías personalizadas
-│   ├── library.js        → tabs Favoritos / Historial / Ver después
+│   ├── utils.js          → API_BASE, STORAGE_VERSION (v6), esc, showToast, loadLS/saveLS
+│   ├── catalog.js        → favs/history/watchLater, cardHtml, itemKey
+│   ├── header.js         → tema claro/oscuro, sidebar (menú), búsqueda Enter, install, SW
+│   ├── home.js           → Explorar, secciones, scroll infinito, continuar viendo
+│   ├── library.js        → render por tipo (favs/wl/hist)
 │   ├── detail.js         → detalle full-screen, temporadas, episodios, compartir
-│   ├── player.js         → sheet de fuentes + reproductor propio/iframe + tags
-│   └── app.js            → boot Explorar, PTR, deep link ?t=, admin modal
+│   ├── player.js         → reproductor propio/iframe + fuentes + ajustes
+│   ├── app.js            → boot Explorar, PTR, deep link ?t=
+│   ├── app-search.js     → boot búsqueda (?q=)
+│   ├── app-cat.js        → boot categorías (?cat=) + scroll infinito
+│   ├── app-lib.js        → boot biblioteca (data-kind)
+│   ├── app-playlist.js   → boot playlist
+│   ├── app-detail.js     → boot detalle
+│   ├── app-ver.js        → boot reproductor
+│   └── admin.js          → panel admin
 └── worker/
-    └── worker.js         → Worker actual (V4, proveedor único Pelispedia)
+    └── worker.js         → Worker (V4, proveedor único Pelispedia)
 ```
 
 ---

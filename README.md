@@ -60,24 +60,32 @@ La configuración del worker (binding D1, secretos) vive en `wrangler.toml`. La 
 ## Estructura
 
 ```
-├── index.html            SPA (Selecciones + 5 vistas)
+├── index.html            MPA: Explorar (secciones + scroll infinito)
+├── buscar.html           Resultados de búsqueda (?q=)
+├── categorias.html       Categorías (?cat=peliculas|series|anime|kdrama)
+├── favoritos.html        Favoritos
+├── ver-despues.html      Ver después
+├── historial.html        Historial
+├── playlist.html         Playlists (próximamente)
+├── detalle.html          Detalle (?id=&type=)
+├── ver.html              Reproductor (?id=&season=&episode=)
 ├── admin.html            Panel privado
 ├── manifest.webmanifest  PWA (standalone)
 ├── sw.js                 Service worker
 ├── css/
-│   ├── style.css         Diseño dark con tokens
+│   ├── style.css         Diseño dark + tema claro con tokens
 │   ├── fonts-material.css
 │   └── fonts/            Inter y Material Symbols (locales)
 ├── js/
 │   ├── utils.js          API base, helpers, toasts, persistencia
 │   ├── catalog.js        Favoritos/historial, cards, tipos
-│   ├── home.js           Portada, hero, secciones, scroll infinito
-│   ├── search.js         Búsqueda con debounce y filtros
-│   ├── categories.js     Tiles de categorías personalizadas
-│   ├── library.js        Favoritos / Historial / Ver después
+│   ├── header.js         Tema, sidebar (menú), búsqueda, install, SW
+│   ├── home.js           Portada, secciones, scroll infinito
+│   ├── library.js        Listas por tipo (favs/wl/hist)
 │   ├── detail.js         Detalle, temporadas, episodios, compartir
 │   ├── player.js         Reproductor propio / iframe + fuentes
-│   └── app.js            Boot Explorar, PTR, deep links, admin modal
+│   ├── app*.js           Boots por página (app, app-search, app-cat, app-lib, app-playlist, app-detail, app-ver)
+│   └── admin.js          Panel admin
 └── worker/
     ├── worker.js         API del Worker
     └── wrangler.toml     Configuración del deploy

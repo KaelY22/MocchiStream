@@ -53,6 +53,7 @@ export function initPlayer() {
   video.addEventListener('pause', () => {
     updatePlayIcon(false);
     showOverlay();
+    showControls(false);
     saveProgress();
   });
   video.addEventListener('waiting', () => {
@@ -164,23 +165,19 @@ function showControls(on) {
   clearTimeout(controlsTimer);
   if (on) stage.classList.add('controls-on');
   else stage.classList.remove('controls-on');
-  if (on && !document.getElementById('playerVideoBox').paused) {
+  const panelOpen = !document.getElementById('settingsPanel').classList.contains('hidden');
+  if (on && !document.getElementById('playerVideoBox').paused && !panelOpen) {
     controlsTimer = setTimeout(() => stage.classList.remove('controls-on'), 2800);
   }
 }
 
 function toggleControls() {
   const stage = document.getElementById('playerStage');
-  const settingPanel = document.getElementById('settingsPanel');
-  if (stage.classList.contains('controls-on')) {
-    stage.classList.remove('controls-on');
-    settingPanel.classList.add('hidden');
-  } else {
+  if (stage.classList.contains('controls-on')) stage.classList.remove('controls-on');
+  else {
     stage.classList.add('controls-on');
-    controlsTimer = setTimeout(() => {
-      stage.classList.remove('controls-on');
-      settingPanel.classList.add('hidden');
-    }, 2800);
+    clearTimeout(controlsTimer);
+    controlsTimer = setTimeout(() => stage.classList.remove('controls-on'), 2800);
   }
 }
 
@@ -353,9 +350,9 @@ function playOwnPlayer(stream, title, resumeAt) {
       }, { once: true });
     }
     video.play().catch(() => showOverlay());
-    video.addEventListener('error', onError, { once: true });
+    video.addEventListener('error', (e) => onError(e.message || 'Error de reproducción'), { once: true });
   } else {
-    onError();
+    onError('Fuente no compatible');
   }
 }
 
@@ -400,6 +397,9 @@ function parseSegments(media, base) {
   let expectUri = false;
   for (const raw of media.split('\n')) {
     const t = raw.trim();
+    if (t.startsWith('#EXT-X-KEY')) throw new Error('stream cifrado (AES) no descargable');
+    if (t.startsWith('#EXT-X-BYTERANGE')) throw new Error('stream con byte-range no descargable');
+    if (t.startsWith('#EXT-X-MAP')) throw new Error('stream fMP4 no descargable');
     if (expectUri) {
       if (t && !t.startsWith('#')) { segs.push(resolveUrl(t, base)); expectUri = false; }
     } else if (t.startsWith('#EXTINF')) {
@@ -451,7 +451,16 @@ async function downloadCurrent() {
       const writer = fileStream.getWriter();
       try {
         for (let i = 0; i < segments.length; i++) {
-          await streamToWriter(await fetch(proxyUrl(segments[i], currentStream.referer)), writer);
+          let ok = false;
+          for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+            try {
+              await streamToWriter(await fetch(proxyUrl(segments[i], currentStream.referer)), writer);
+              ok = true;
+            } catch (e) {
+              if (attempt === 1) throw e;
+              await new Promise(r => setTimeout(r, 800));
+            }
+          }
           if ((i + 1) % 10 === 0 || i === segments.length - 1) {
             showToast(`Descargando ${i + 1}/${segments.length} partes...`);
           }
@@ -497,6 +506,7 @@ function toggleSettingsPanel() {
   const panel = document.getElementById('settingsPanel');
   if (panel.classList.contains('hidden')) {
     panel.classList.remove('hidden');
+    clearTimeout(controlsTimer);
     showControls(true);
   } else {
     hideSettingsPanel();
@@ -560,7 +570,7 @@ function populateSettings() {
     aSection.classList.remove('hidden');
     aList.innerHTML = '';
     audioTracks.forEach((track, i) => {
-      const label = track.name || track.lang || `Pista ${i + 1}`;
+      const label = esc(track.name || track.lang || `Pista ${i + 1}`);
       aList.innerHTML += `<button class="settings-item" data-audio="${i}"><span class="settings-item-label">${label}</span>${buildCheckSvg()}</button>`;
     });
     aList.querySelectorAll('.settings-item').forEach(btn => {
@@ -581,7 +591,7 @@ function populateSettings() {
     subSection.classList.remove('hidden');
     subList.innerHTML = `<button class="settings-item active" data-sub="-1"><span class="settings-item-label">Desactivados</span>${buildCheckSvg()}</button>`;
     subTracks.forEach((track, i) => {
-      const label = track.name || track.lang || `Pista ${i + 1}`;
+      const label = esc(track.name || track.lang || `Pista ${i + 1}`);
       subList.innerHTML += `<button class="settings-item" data-sub="${i}"><span class="settings-item-label">${label}</span>${buildCheckSvg()}</button>`;
     });
     subList.querySelectorAll('.settings-item').forEach(btn => {

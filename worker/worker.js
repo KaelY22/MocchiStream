@@ -111,7 +111,7 @@ function jsonResponse(data, corsHeaders, status = 200) {
   });
 }
 
-const PRIVATE_HOST_RE = /(?:^|\.)(?:local|internal|localhost|lan)$|^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d)\.|0\.)/i;
+const PRIVATE_HOST_RE = /(?:^|\.)(?:local|internal|localhost|lan)$|^(?:10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d)\.|0\.)|:|^\d+$/i;
 
 const STREAM_ALLOWED_HOSTS = [
   'vimeos.net', 'vimeos.zip', 'goodstream.one', 'hlswish.com', 'uqload.*', 'fastream.to',
@@ -187,6 +187,10 @@ function firstSuccess(promises) {
 
 const adminAttempts = new Map();
 function adminRateLimited(ip) {
+  if (adminAttempts.size > 1000) {
+    const now = Date.now();
+    for (const [k, v] of adminAttempts) if (now > v.reset) adminAttempts.delete(k);
+  }
   const now = Date.now();
   let record = adminAttempts.get(ip);
   if (!record || now > record.reset) {
@@ -197,25 +201,41 @@ function adminRateLimited(ip) {
   return record.count > 10;
 }
 
-async function fetchHTML(url, timeout = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
+async function fetchSafe(url, opts = {}) {
+  const { allowed = null, timeout = 10000, headers = {}, redirects = 3 } = opts;
+  let current = url;
+  for (let i = 0; i <= redirects; i++) {
+    if (allowed && !assertSafeUrl(current, allowed)) throw new Error('URL no permitida');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(current, { headers, signal: controller.signal, redirect: 'manual' });
+      clearTimeout(timer);
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) return res;
+        current = new URL(loc, current).href;
+        continue;
+      }
+      return res;
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
   }
+  throw new Error('Demasiados redirects');
+}
+
+async function fetchHTML(url, timeout = 8000, allowed = null) {
+  const headers = {
+    'User-Agent': USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+  };
+  const firstHost = new URL(url).hostname;
+  const res = await fetchSafe(url, { allowed: allowed || [firstHost], timeout, headers });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.text();
 }
 
 async function cacheGet(key) {
@@ -301,7 +321,7 @@ async function discover(path, page, params, env, key) {
   return (data.results || []).map(r => toItem(r, true)).filter(Boolean);
 }
 
-async function fetchTop10(url, env, key) {
+async function fetchTop10(env, key) {
   const [m, t] = await Promise.all([
     tmdbGet('/trending/movie/week', {}, env, key, 86400),
     tmdbGet('/trending/tv/week', {}, env, key, 86400),
@@ -316,9 +336,9 @@ async function homeSection(slug, page, env, key) {
   const now = new Date().getFullYear();
   switch (slug) {
     case 'top10global':
-      return fetchTop10('https://www.netflix.com/tudum/top10', env, key);
+      return fetchTop10(env, key);
     case 'top10mexico':
-      return fetchTop10('https://www.netflix.com/tudum/top10/mexico', env, key);
+      return fetchTop10(env, key);
     case 'popular':
       return discover('movie', page, {}, env, key).then(m => discover('tv', page, {}, env, key).then(t => m.concat(t)));
     case 'top':
@@ -337,6 +357,10 @@ async function homeSection(slug, page, env, key) {
       return discover('tv', page, { with_original_language: 'ko' }, env, key);
     case 'anime':
       return discover('tv', page, { with_genres: '16', with_original_language: 'ja' }, env, key);
+    case 'peliculas':
+      return discover('movie', page, {}, env, key);
+    case 'series':
+      return discover('tv', page, {}, env, key);
     default: {
       const g = GENRE_SECTIONS.find(([s]) => s === slug.replace('genero-', ''));
       if (!g) return [];
@@ -353,7 +377,7 @@ async function handleMainPage(url, env, corsHeaders, key) {
   const page = Math.max(1, parseInt(url.searchParams.get('page')) || 1);
 
   if (section) {
-    const cacheKey = `home/v9/${section}/${page}`;
+    const cacheKey = 'home/v9/' + encodeURIComponent(section) + '/' + page;
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
     try {
@@ -418,7 +442,7 @@ async function handleSearch(query, env, corsHeaders, key) {
 }
 
 async function handleDetails(id, type, env, corsHeaders, key) {
-  const cacheKey = `details/v2/${type}/${id}`;
+  const cacheKey = 'details/v2/' + type + '/' + encodeURIComponent(id);
   const hit = await cacheGet(cacheKey);
   if (hit) return hit;
   try {
@@ -458,15 +482,21 @@ async function handleDetails(id, type, env, corsHeaders, key) {
     }
     return cachePut(cacheKey, item, 604800, corsHeaders, env);
   } catch (e) {
-    return jsonResponse({ error: e.message }, corsHeaders, 500);
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
   }
 }
 
 // ==================== REPRODUCCIÓN ON-DEMAND ====================
 const FAST_PRIORITY = [
-  /vimeos\.(?:net|zip)/i, /goodstream\.one/i, /fastream\.to/i, /hlswish\.com/i,
+  /vimeos\.(?:net|zip)/i,
   /doodstream\.com|dooood\.com|doods\.pro|dood\.la|d0000d\.com|d000d\.com/i,
+  /byse\w*\.(?:com|sx)/i,
+  /streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash/i,
+  /streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to|embedwish\.com|wishembed\.pro|hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|kswplayer\.info|wishfast\.top/i,
+  /goodstream\.one/i,
+  /hlswish\.com/i,
   /uqload\.[a-z]+/i,
+  /fastream\.to/i,
 ];
 
 function fastRank(u) {
@@ -629,6 +659,16 @@ function latanimeEmbeds(html) {
     .filter(u => /^https?:/.test(u));
 }
 
+function latanimeEpisodeLinks(html) {
+  const links = [];
+  const re = /href="([^"]*\/ver\/[^"]*?episodio-(\d+)[^"]*)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    links.push({ url: m[1], season: 1, episode: parseInt(m[2]) });
+  }
+  return links;
+}
+
 const SITES = {
   movies: [
     {
@@ -673,10 +713,8 @@ const SITES = {
       searchUrl: q => `https://latanime.org/buscar?q=${encodeURIComponent(q)}`,
       parse: extractLatanimeItems,
       embeds: latanimeEmbeds,
-      episodeUrl: (base, season, episode) => {
-        const slug = base.replace(/\/+$/, '').split('/').pop();
-        return `https://latanime.org/ver/${slug}-episodio-${episode}`;
-      },
+      episodeLinks: latanimeEpisodeLinks,
+      episodeUrl: (base) => base,
       hasEpisodes: true,
     },
   ],
@@ -702,6 +740,7 @@ async function resolveEmbed(embedUrl, deadline) {
   if (Date.now() > deadline) return null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (Date.now() > deadline) return null;
+    if (attempt > 0 && Date.now() < deadline) await new Promise(r => setTimeout(r, 500));
     let result = null;
     try {
       result = await extractOnce(embedUrl, deadline);
@@ -717,14 +756,14 @@ async function resolveEmbed(embedUrl, deadline) {
 async function trySite(site, query, queryBase, season, episode, deadline, type) {
   let items = [];
   try {
-    const html = await fetchHTML(site.searchUrl(query), 5000);
+    const html = await fetchHTML(site.searchUrl(query), 4000, SITE_ALLOWED_HOSTS);
     items = site.parse(html);
   } catch (e) {
     return [];
   }
   if (!items.length && queryBase && queryBase !== query && Date.now() < deadline) {
     try {
-      const html = await fetchHTML(site.searchUrl(queryBase), 5000);
+      const html = await fetchHTML(site.searchUrl(queryBase), 4000, SITE_ALLOWED_HOSTS);
       items = site.parse(html);
     } catch (e) {}
   }
@@ -739,10 +778,14 @@ async function trySite(site, query, queryBase, season, episode, deadline, type) 
   let embeds = [];
   try {
     let target = pickEpisodeUrl(site, match, season, episode);
-    let html = await fetchHTML(target, 5000);
+    if (!assertSafeUrl(target, SITE_ALLOWED_HOSTS)) return [];
+    let html = await fetchHTML(target, 4000, SITE_ALLOWED_HOSTS);
     if (season && episode && site.episodeLinks) {
       const ep = site.episodeLinks(html).find(l => l.season === season && l.episode === episode);
-      if (ep) html = await fetchHTML(ep.url, 5000);
+      if (ep) {
+        if (!assertSafeUrl(ep.url, SITE_ALLOWED_HOSTS)) return [];
+        html = await fetchHTML(ep.url, 4000, SITE_ALLOWED_HOSTS);
+      }
     }
     embeds = site.embeds(html);
   } catch (e) {}
@@ -758,7 +801,7 @@ async function handlePlay(url, env, corsHeaders) {
   const anime = url.searchParams.get('anime') === '1';
   if (!title) return jsonResponse({ error: 'Missing title' }, corsHeaders, 400);
 
-  const cacheKey = 'play/v1/' + (anime ? 'anime' : type) + '/' + encodeURIComponent(normTitle(title)) + '/' + (season || 0) + '/' + (episode || 0);
+  const cacheKey = 'play/v1/' + (anime ? 'anime' : type) + '/' + encodeURIComponent(normTitle(title)) + '/' + (year || 0) + '/' + (season || 0) + '/' + (episode || 0);
   const hit = await cacheGet(cacheKey);
   if (hit) {
     const cached = await hit.json();
@@ -772,11 +815,11 @@ async function handlePlay(url, env, corsHeaders) {
   const query = year ? `${title} ${year}` : title;
   const queryBase = title;
 
-  const embedsList = await mapLimit(sites, sites.length, site => trySite(site, query, queryBase, season, episode, deadline, type));
+  const embedsList = await mapLimit(sites, sites.length, site => trySite(site, query, queryBase, season, episode, deadline, anime ? 'tv' : type));
   const embeds = embedsList.flat();
   const sorted = sortEmbeds(embeds);
   const firstIframe = sorted.find(u => fastRank(u) === -1) || null;
-  const fasts = sorted.filter(u => fastRank(u) !== -1).slice(0, 6);
+  const fasts = sorted.filter(u => fastRank(u) !== -1).slice(0, 4);
 
   const timeout = ms => new Promise(r => setTimeout(r, ms));
   const winner = await firstSuccess(fasts.map(u =>
@@ -806,26 +849,34 @@ function b64UrlDecode(str) {
 }
 
 async function fetchFollow(url, timeout = 8000) {
-  if (!assertSafeUrl(url)) throw new Error('URL no permitida');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-      },
-      redirect: 'follow',
-      signal: controller.signal
-    });
+  let current = url;
+  const headers = {
+    'User-Agent': USER_AGENT,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+  };
+  for (let i = 0; i <= 3; i++) {
+    if (!assertSafeUrl(current, STREAM_ALLOWED_HOSTS)) throw new Error('URL no permitida');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    let response;
+    try {
+      response = await fetch(current, { headers, signal: controller.signal, redirect: 'manual' });
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
     clearTimeout(timer);
+    if (response.status >= 300 && response.status < 400) {
+      const loc = response.headers.get('location');
+      if (!loc) break;
+      current = new URL(loc, current).href;
+      continue;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return { url: response.url, text: await response.text(), headers: response.headers };
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
+    return { url: current, text: await response.text(), headers: response.headers };
   }
+  throw new Error('Demasiados redirects');
 }
 
 async function extractDoodstream(url) {
@@ -838,10 +889,11 @@ async function extractDoodstream(url) {
   const reqHeaders = { 'User-Agent': USER_AGENT, 'Referer': finalUrl };
   const cookie = embedHeaders ? embedHeaders.get('set-cookie') : null;
   if (cookie) reqHeaders['Cookie'] = cookie;
-  const res = await fetch(md5Url, { headers: reqHeaders, redirect: 'follow' });
+  const res = await fetchSafe(md5Url, { allowed: STREAM_ALLOWED_HOSTS, timeout: 8000, headers: reqHeaders });
   if (!res.ok) return null;
   const videoUrl = (await res.text()).trim();
   if (!videoUrl.startsWith('http')) return null;
+  if (!assertSafeUrl(videoUrl, STREAM_ALLOWED_HOSTS)) return null;
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let random = '';
   for (let i = 0; i < 10; i++) random += alphabet[Math.floor(Math.random() * alphabet.length)];
@@ -852,16 +904,21 @@ async function extractDoodstream(url) {
 async function extractByse(url) {
   const base = new URL(url).origin;
   const code = new URL(url).pathname.replace(/\/+$/, '').split('/').pop();
-  const detailsRes = await fetch(`${base}/api/videos/${code}/embed/details`, {
+  const detailsRes = await fetchSafe(`${base}/api/videos/${code}/embed/details`, {
+    allowed: STREAM_ALLOWED_HOSTS,
+    timeout: 8000,
     headers: { 'User-Agent': USER_AGENT }
   });
   if (!detailsRes.ok) return null;
   const details = await detailsRes.json();
   const embedFrameUrl = details.embed_frame_url;
   if (!embedFrameUrl) return null;
+  if (!assertSafeUrl(embedFrameUrl, STREAM_ALLOWED_HOSTS)) return null;
   const embedBase = new URL(embedFrameUrl).origin;
   const ecode = new URL(embedFrameUrl).pathname.replace(/\/+$/, '').split('/').pop();
-  const playbackRes = await fetch(`${embedBase}/api/videos/${ecode}/embed/playback`, {
+  const playbackRes = await fetchSafe(`${embedBase}/api/videos/${ecode}/embed/playback`, {
+    allowed: STREAM_ALLOWED_HOSTS,
+    timeout: 8000,
     headers: {
       'User-Agent': USER_AGENT,
       'accept': '*/*',
@@ -997,7 +1054,8 @@ async function extractOnce(targetUrl, deadline) {
     if (deadline && Date.now() > deadline) return null;
     if (!assertSafeUrl(current, STREAM_ALLOWED_HOSTS)) return null;
     const html = await fetchHTML(current, STREAM_TIMEOUT);
-    const redirectMatch = html.match(/window\.location\.(?:href|replace)\s*=\s*['"]([^'"]+)['"]/i);
+    const redirectMatch = html.match(/(?:window\.)?(?:document\.)?location\.(?:href\s*=|replace\(|assign\()\s*['"]([^'"]+)['"]/i)
+      || html.match(/<meta[^>]*http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)["']/i);
     if (redirectMatch) {
       const next = decodeEntities(redirectMatch[1]);
       if (next.startsWith('/')) current = new URL(next, current).href;
@@ -1023,45 +1081,38 @@ async function extractOnce(targetUrl, deadline) {
 
 async function verifyStream(result) {
   if (!result || result.type !== 'hls') return true;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 7000);
+  const headers = { 'User-Agent': USER_AGENT, 'Accept': '*/*' };
+  if (result.referer) headers['Referer'] = result.referer;
+  let text;
   try {
-    const headers = { 'User-Agent': USER_AGENT, 'Accept': '*/*' };
-    if (result.referer) headers['Referer'] = result.referer;
-    const res = await fetch(result.url, { headers, redirect: 'follow', signal: controller.signal });
+    const res = await fetchSafe(result.url, { allowed: STREAM_ALLOWED_HOSTS, timeout: 7000, headers });
     if (!res.ok) return false;
-    const text = await res.text();
-    if (!text.trimStart().startsWith('#EXTM3U')) return false;
-    if (/#EXT-X-STREAM-INF/i.test(text)) return true;
-    const segMatch = text.match(/#EXTINF:[^,\n]+,?\s*\n\s*([^\s#][^\n]*)/);
-    if (!segMatch) return true;
-    const segUrl = new URL(segMatch[1], result.url).href;
-    const segController = new AbortController();
-    const segTimer = setTimeout(() => segController.abort(), 3000);
-    try {
-      const segRes = await fetch(segUrl, { headers, redirect: 'follow', signal: segController.signal });
-      if (!segRes.ok) return false;
-      const reader = segRes.body.getReader();
-      const start = Date.now();
-      let bytes = 0;
-      let elapsed = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        bytes += value.length;
-        elapsed = (Date.now() - start) / 1000;
-        if (elapsed >= 2.5) break;
-      }
-      return bytes / Math.max(elapsed, 0.1) >= 50 * 1024;
-    } catch (e) {
-      return false;
-    } finally {
-      clearTimeout(segTimer);
-    }
+    text = await res.text();
   } catch (e) {
     return false;
-  } finally {
-    clearTimeout(timer);
+  }
+  if (!text.trimStart().startsWith('#EXTM3U')) return false;
+  if (/#EXT-X-STREAM-INF/i.test(text)) return true;
+  const segMatch = text.match(/#EXTINF:[^,\n]+,?\s*\n(?:(?:#EXT-X-[A-Z-]+:[^\n]*|#[^\n]*)\n)*\s*([^\s#][^\n]*)/);
+  if (!segMatch) return false;
+  const segUrl = new URL(segMatch[1], result.url).href;
+  try {
+    const segRes = await fetchSafe(segUrl, { allowed: STREAM_ALLOWED_HOSTS, timeout: 3000, headers });
+    if (!segRes.ok) return false;
+    const reader = segRes.body.getReader();
+    const start = Date.now();
+    let bytes = 0;
+    let elapsed = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      elapsed = (Date.now() - start) / 1000;
+      if (elapsed >= 2.5) break;
+    }
+    return bytes / Math.max(elapsed, 0.1) >= 50 * 1024;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -1069,10 +1120,12 @@ async function verifyWithVimeosRewrite(result) {
   if (await verifyStream(result)) return result;
   try {
     const u = new URL(result.url);
-    if (/\.vimeos\.(?:net|zip)$/i.test(u.hostname) && u.hostname !== 'p3.vimeos.zip') {
-      u.hostname = 'p3.vimeos.zip';
-      const alt = { ...result, url: u.href };
-      if (await verifyStream(alt)) return alt;
+    if (/^(?:[a-z0-9-]+\.)?vimeos\.(?:net|zip)$/i.test(u.hostname)) {
+      for (const host of ['p3.vimeos.zip', 'p2.vimeos.zip']) {
+        if (u.hostname === host) continue;
+        const alt = { ...result, url: new URL(u.href).href.replace(u.hostname, host) };
+        if (await verifyStream(alt)) return alt;
+      }
     }
   } catch (e) {}
   return null;
@@ -1101,7 +1154,6 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
       if (verified) {
         return cachePut(cacheKey, { ok: true, ...verified }, 300, corsHeaders, env);
       }
-      return jsonResponse({ ok: false }, corsHeaders);
     }
     const deadline = Date.now() + 15000;
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -1124,31 +1176,27 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
   }
 }
 
-async function fetchM3U8WithRetry(targetUrl, ref) {
+async function fetchM3U8WithRetry(targetUrl, ref, corsHeaders) {
   const headers = {
     'User-Agent': USER_AGENT,
     'Accept': '*/*',
   };
   if (ref) headers['Referer'] = ref;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     let res;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
     try {
-      res = await fetch(targetUrl, { headers, redirect: 'follow', signal: controller.signal });
+      res = await fetchSafe(targetUrl, { allowed: STREAM_ALLOWED_HOSTS, timeout: 8000, headers });
     } catch (err) {
-      clearTimeout(timer);
-      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+      if (attempt < 1) await new Promise(r => setTimeout(r, 400));
       continue;
     }
-    clearTimeout(timer);
     if (!res.ok) {
-      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+      if (attempt < 1) await new Promise(r => setTimeout(r, 400));
       continue;
     }
     const text = await res.text();
     if (!text.trimStart().startsWith('#EXTM3U')) {
-      await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+      if (attempt < 1) await new Promise(r => setTimeout(r, 400));
       continue;
     }
     const isMaster = /#EXT-X-STREAM-INF/i.test(text);
@@ -1167,7 +1215,7 @@ async function fetchM3U8WithRetry(targetUrl, ref) {
     out.set('Cache-Control', 'no-store');
     return new Response(body, { status: 200, headers: out });
   }
-  return jsonResponse({ error: 'Upstream no devolvió un manifiesto válido' }, { 'Access-Control-Allow-Origin': '*' }, 502);
+  return jsonResponse({ error: 'Upstream no devolvió un manifiesto válido' }, corsHeaders, 502);
 }
 
 async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
@@ -1177,7 +1225,7 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
   const ref = reqUrl.searchParams.get('ref') || '';
   const range = request.headers.get('Range') || '';
   if (/\.(?:m3u8|txt)([?#]|$)/i.test(targetUrl)) {
-    return fetchM3U8WithRetry(targetUrl, ref);
+    return fetchM3U8WithRetry(targetUrl, ref, corsHeaders);
   }
   const headers = {
     'User-Agent': USER_AGENT,
@@ -1186,14 +1234,11 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
   if (ref) headers['Referer'] = ref;
   if (range) headers['Range'] = range;
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(targetUrl, { headers, redirect: 'follow', signal: controller.signal });
-      clearTimeout(timer);
-      if ((res.status === 403 || res.status === 429 || res.status >= 500) && attempt < 2) {
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      const res = await fetchSafe(targetUrl, { allowed: STREAM_ALLOWED_HOSTS, timeout: 8000, headers });
+      if ((res.status === 403 || res.status === 429 || res.status >= 500) && attempt < 1) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
         continue;
       }
       const outHeaders = new Headers();
@@ -1205,9 +1250,8 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
       outHeaders.set('Cache-Control', 'no-store');
       return new Response(res.body, { status: res.status, headers: outHeaders });
     } catch (err) {
-      clearTimeout(timer);
-      if (attempt < 2) {
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      if (attempt < 1) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
         continue;
       }
       return jsonResponse({ error: err.message }, corsHeaders, 502);
@@ -1217,20 +1261,38 @@ async function handleProxy(targetUrl, reqUrl, request, corsHeaders) {
 
 // ==================== ADMIN ====================
 async function handleGetAvatar(env, corsHeaders) {
-  const { results } = await env.DB.prepare('SELECT value FROM config WHERE key = ?').bind('avatar').all();
-  const avatar = results.length ? results[0].value : '';
-  return jsonResponse({ avatar }, corsHeaders);
+  try {
+    const { results } = await env.DB.prepare('SELECT value FROM config WHERE key = ?').bind('avatar').all();
+    const avatar = results.length ? results[0].value : '';
+    return jsonResponse({ avatar }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
 }
 
 async function handleUpdateAvatar(request, env, corsHeaders) {
-  const { avatar } = await request.json();
-  await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind('avatar', avatar).run();
-  return jsonResponse({ success: true }, corsHeaders);
+  let body;
+  try {
+    body = await request.json();
+  } catch (err) {
+    return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400);
+  }
+  try {
+    const { avatar } = body;
+    await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind('avatar', avatar).run();
+    return jsonResponse({ success: true }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
 }
 
 async function handleDeleteAvatar(env, corsHeaders) {
-  await env.DB.prepare('UPDATE config SET value = ? WHERE key = ?').bind('', 'avatar').run();
-  return jsonResponse({ success: true }, corsHeaders);
+  try {
+    await env.DB.prepare('UPDATE config SET value = ? WHERE key = ?').bind('', 'avatar').run();
+    return jsonResponse({ success: true }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
 }
 
 async function handleAdminStats(env, corsHeaders) {
@@ -1246,7 +1308,12 @@ async function handleAdminStats(env, corsHeaders) {
 }
 
 async function handleCachePurge(request, env, corsHeaders) {
-  const { scope } = await request.json();
+  let scope;
+  try {
+    ({ scope } = await request.json());
+  } catch (err) {
+    return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400);
+  }
   if (!['all', 'search', 'home', 'tmdb'].includes(scope)) {
     return jsonResponse({ error: 'Invalid scope' }, corsHeaders, 400);
   }
@@ -1257,6 +1324,7 @@ async function handleCachePurge(request, env, corsHeaders) {
   const { results } = await env.DB.prepare('SELECT key FROM cache_keys' + where).all();
   let deleted = 0;
   for (const row of results) {
+    if (deleted >= 500) break;
     await caches.default.delete(new Request(CACHE_HOST + '/' + row.key));
     deleted++;
   }

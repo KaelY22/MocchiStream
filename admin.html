@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#0f0f1a" />
   <title>MocchiStream · Gestión</title>
   <link rel="stylesheet" href="css/style.css" />
+  <script>try{if(localStorage.getItem('ms_theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}</script>
 </head>
 <body>
   <div class="admin-page">
@@ -25,6 +26,17 @@
         <p id="loginErrorMsg" class="error-msg hidden">Contraseña incorrecta</p>
       </div>
     </div>
+
+    <nav class="admin-nav hidden" id="adminNav">
+      <button class="nav-item active" data-view="panel" aria-label="Panel">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
+        <span>Panel</span>
+      </button>
+      <button class="nav-item" data-view="profile" aria-label="Perfil">
+        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></span>
+        <span>Perfil</span>
+      </button>
+    </nav>
 
     <div id="adminContent" class="admin-content hidden animate-fade-in-up">
 
@@ -72,17 +84,6 @@
         </div>
       </section>
     </div>
-
-    <nav class="bottom-nav hidden" id="adminNav">
-      <button class="nav-item active" data-view="panel" aria-label="Panel">
-        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
-        <span>Panel</span>
-      </button>
-      <button class="nav-item" data-view="profile" aria-label="Perfil">
-        <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></span>
-        <span>Perfil</span>
-      </button>
-    </nav>
   </div>
 
   <div id="toast" class="toast hidden"></div>

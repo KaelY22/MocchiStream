@@ -1,13 +1,16 @@
 import { showToast, resetStorageIfStale } from './utils.js';
 import { loadLists } from './catalog.js';
 import { initDetail, openDetail, closeDetail, fetchItem } from './detail.js';
-import { loadAvatar, setupAdminEsc, registerSW, openAdminModal, loginAdmin } from './header.js';
+import { applyTheme, setupTheme, setupMenu, setupSearch, setupInstall, registerSW } from './header.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   if (resetStorageIfStale()) showToast('Datos locales renovados');
+  applyTheme();
   loadLists();
-  loadAvatar();
-  setupAdminEsc();
+  setupTheme();
+  setupMenu();
+  setupSearch();
+  setupInstall();
   registerSW();
   initDetail();
   document.getElementById('detailShareBtn').addEventListener('click', shareTitle);
@@ -29,8 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-window.openAdminModal = openAdminModal;
-window.loginAdmin = loginAdmin;
 window.closeDetail = closeDetail;
 
 function shareTitle() {

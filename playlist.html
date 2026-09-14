@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>Buscar — MocchiStream</title>
+  <title>Playlists — MocchiStream</title>
   <meta name="theme-color" content="#0f0f1a" />
-  <meta name="description" content="Busca películas y series en MocchiStream." />
+  <meta name="description" content="Tus playlists en MocchiStream." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" type="image/png" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -31,10 +31,12 @@
   </header>
 
   <main class="app-main">
-    <section id="view-search" class="app-view">
-      <h2 class="search-view-head" id="searchHead">Resultados</h2>
-      <div id="searchGrid" class="video-grid"></div>
-      <div id="searchStatus" class="status-msg hidden"></div>
+    <section class="app-view">
+      <div class="empty-state" style="padding-top:4rem;">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 1.5-4.5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
+        <h2 class="search-view-head" style="margin-bottom:0.4rem;">Playlists</h2>
+        <p>Próximamente podrás crear tus propias listas.</p>
+      </div>
     </section>
   </main>
 
@@ -44,6 +46,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="js/app-search.js"></script>
+  <script type="module" src="js/app-playlist.js"></script>
 </body>
 </html>

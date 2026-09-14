@@ -1,22 +1,24 @@
-const CACHE = 'mocchi-v34';
+const CACHE = 'mocchi-v36';
 const ASSETS = [
   '/',
   '/index.html',
   '/buscar.html',
-  '/guardados.html',
-  '/perfil.html',
+  '/favoritos.html',
+  '/ver-despues.html',
+  '/historial.html',
+  '/playlist.html',
+  '/categorias.html',
   '/detalle.html',
   '/ver.html',
+  '/404.html',
   '/admin.html',
   '/manifest.webmanifest',
   '/css/style.css',
-  '/css/fonts-material.css',
   '/css/fonts/inter-var.woff2',
   '/js/utils.js',
   '/js/catalog.js',
   '/js/header.js',
   '/js/home.js',
-  '/js/search.js',
   '/js/library.js',
   '/js/detail.js',
   '/js/player.js',
@@ -24,15 +26,17 @@ const ASSETS = [
   '/js/StreamSaver.js',
   '/js/app.js',
   '/js/app-search.js',
-  '/js/app-library.js',
-  '/js/app-profile.js',
+  '/js/app-lib.js',
+  '/js/app-cat.js',
+  '/js/app-playlist.js',
   '/js/app-detail.js',
   '/js/app-ver.js',
   '/js/admin.js',
   '/saver/mitm.html',
   '/saver/sw.js',
   '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  '/icons/icon-512.png',
+  '/icons/profile.png'
 ];
 
 self.addEventListener('install', e => {
@@ -59,7 +63,7 @@ self.addEventListener('fetch', e => {
   if (url.pathname.startsWith('/api')) return;
   if (req.mode === 'navigate') {
     e.respondWith(
-      fetch(req).catch(() => caches.match('/index.html'))
+      fetch(req).catch(() => caches.match(req).then(hit => hit || caches.match('/index.html')))
     );
     return;
   }

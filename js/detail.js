@@ -1,4 +1,4 @@
-import { API_BASE, esc, showToast, safeImg } from './utils.js';
+import { API_BASE, esc, showToast, safeImg, PLACEHOLDER_SVG } from './utils.js';
 import { isFav, toggleFav, isInWatchLater, toggleWatchLater, setDetailFavUpdater } from './catalog.js';
 
 let currentDetail = null;
@@ -60,7 +60,8 @@ export function openDetail(item, season) {
   detailSeason = season || seasons[0] || 1;
 
   const backdrop = document.getElementById('detailBackdrop');
-  backdrop.style.backgroundImage = (item.backdrop || item.poster) ? `url(${item.backdrop || item.poster})` : '';
+  const bgUrl = safeImg(item.backdrop || item.poster);
+  backdrop.style.backgroundImage = bgUrl !== PLACEHOLDER_SVG ? `url(${bgUrl})` : '';
   document.getElementById('detailTitle').textContent = item.title;
   const badges = [item.type === 'tv' ? 'Serie' : 'Película'];
   if (item.year) badges.push(String(item.year));
@@ -145,7 +146,7 @@ function updateDetailFavBtn() {
 
 export function closeDetail() {
   const view = document.getElementById('detailView');
-  if (view.classList.contains('hidden')) return;
+  if (view.classList.contains('hidden') || view.classList.contains('closing')) return;
   view.classList.add('closing');
   setTimeout(() => {
     view.classList.add('hidden');

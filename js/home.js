@@ -113,14 +113,14 @@ function bindHomeEvents(home) {
   });
 }
 
-let sectionLoading = false;
+const loadingSections = new Set();
 
 function loadSectionMore(sec, gridEl) {
-  if (sectionLoading) return;
-  sectionLoading = true;
+  const slug = sec.dataset.slug;
+  if (loadingSections.has(slug)) return;
+  loadingSections.add(slug);
   const page = parseInt(gridEl.dataset.page) + 1;
   gridEl.dataset.page = page;
-  const slug = sec.dataset.slug;
   fetch(`${API_BASE}/mainpage?section=${encodeURIComponent(slug)}&page=${page}`)
     .then(res => res.json())
     .then(items => {
@@ -133,5 +133,5 @@ function loadSectionMore(sec, gridEl) {
       if (fresh.length) gridEl.insertAdjacentHTML('beforeend', fresh.map(cardHtml).join(''));
     })
     .catch(() => { gridEl.dataset.page = page - 1; })
-    .finally(() => { sectionLoading = false; });
+    .finally(() => { loadingSections.delete(slug); });
 }

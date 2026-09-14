@@ -1,14 +1,16 @@
 import { showToast, resetStorageIfStale } from './utils.js';
 import { loadLists } from './catalog.js';
 import { loadHome } from './home.js';
-import { loadAvatar, setupInstall, setupAdminEsc, registerSW, openAdminModal, loginAdmin } from './header.js';
+import { applyTheme, setupTheme, setupMenu, setupSearch, setupInstall, registerSW } from './header.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   if (resetStorageIfStale()) showToast('Datos locales renovados');
+  applyTheme();
   loadLists();
-  loadAvatar();
+  setupTheme();
+  setupMenu();
+  setupSearch();
   setupInstall();
-  setupAdminEsc();
   registerSW();
   const params = new URLSearchParams(location.search);
   const deepId = params.get('t');
@@ -74,8 +76,4 @@ function refreshHome() {
     </div>
   `).join('');
   loadHome();
-  loadAvatar();
 }
-
-window.openAdminModal = openAdminModal;
-window.loginAdmin = loginAdmin;

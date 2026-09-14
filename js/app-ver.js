@@ -2,13 +2,16 @@ import { showToast, resetStorageIfStale } from './utils.js';
 import { loadLists } from './catalog.js';
 import { initPlayer, playItem, closeFullPlayer } from './player.js';
 import { fetchItem, nextEpisodeResolver } from './detail.js';
-import { loadAvatar, setupAdminEsc, registerSW, openAdminModal, loginAdmin } from './header.js';
+import { applyTheme, setupTheme, setupMenu, setupSearch, setupInstall, registerSW } from './header.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   if (resetStorageIfStale()) showToast('Datos locales renovados');
+  applyTheme();
   loadLists();
-  loadAvatar();
-  setupAdminEsc();
+  setupTheme();
+  setupMenu();
+  setupSearch();
+  setupInstall();
   registerSW();
   initPlayer();
   const params = new URLSearchParams(location.search);
@@ -22,12 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   fetchItem(id, type)
     .then(item => {
-      const ep = season ? { season: parseInt(season, 10), episode: parseInt(episode, 10) } : null;
+      const ep = (season && episode) ? { season: parseInt(season, 10), episode: parseInt(episode, 10) } : null;
       playItem(item, ep, nextEpisodeResolver(item));
     })
     .catch(() => showToast('No se pudo cargar el título.', true));
 });
 
-window.openAdminModal = openAdminModal;
-window.loginAdmin = loginAdmin;
 window.closeFullPlayer = closeFullPlayer;

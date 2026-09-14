@@ -18,17 +18,18 @@ document.addEventListener('DOMContentLoaded', () => {
 function adminLoginCheck() {
   const pwd = document.getElementById('loginPassword').value;
   if (!pwd) return;
-  adminPassword = pwd;
-  localStorage.setItem('admin_password', pwd);
-  localStorage.setItem('admin_timestamp', Date.now().toString());
   fetch(`${API_BASE}/admin/avatar`, { headers: { 'X-Admin-Password': pwd } })
     .then(res => {
-      if (res.ok) { showAdminUI(); }
-      else { throw new Error('Invalid password'); }
+      if (!res.ok) throw new Error('Invalid password');
+      adminPassword = pwd;
+      localStorage.setItem('admin_password', pwd);
+      localStorage.setItem('admin_timestamp', Date.now().toString());
+      showAdminUI();
     })
     .catch(() => {
       document.getElementById('loginErrorMsg').classList.remove('hidden');
       localStorage.removeItem('admin_password');
+      localStorage.removeItem('admin_timestamp');
     });
 }
 

@@ -10,7 +10,7 @@ let currentDetailItem = null;
 const KEEP_RE = /pelispedia\./i;
 
 function cleanStale(list) {
-  return (list || []).filter(i => (i && i.id) || KEEP_RE.test(i.url || ''));
+  return (list || []).filter(i => i && (i.id || KEEP_RE.test(i.url || '')));
 }
 
 export function loadLists() {
@@ -123,9 +123,6 @@ export function toggleWatchLater(item) {
     showToast('Agregado a Ver después');
   }
   saveLS('ms_watchlater', watchLater);
-  document.querySelectorAll('.wl-btn').forEach(btn => {
-    if (btn.dataset.id === String(item.id) && btn.dataset.type === item.type) btn.classList.toggle('on', isInWatchLater(item));
-  });
   notifyListChanged();
 }
 
@@ -194,3 +191,7 @@ export function cardHtml(item, opts = {}) {
 
 export function setCurrentDetailItem(item) { currentDetailItem = item; }
 export function getCurrentDetailItem() { return currentDetailItem; }
+
+window.toggleFavFromCard = toggleFavFromCard;
+window.removeFromHistory = removeFromHistory;
+window.removeFromWatchLater = removeFromWatchLater;

@@ -3,6 +3,7 @@
   "short_name": "MocchiStream",
   "description": "Películas y series en streaming, sin cuentas y sin complicaciones.",
   "start_url": "/",
+  "id": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
