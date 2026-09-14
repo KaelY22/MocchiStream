@@ -1,7 +1,5 @@
 import { API_BASE, esc, showToast, safeImg } from './utils.js';
-import { isFav, toggleFav, isInWatchLater, toggleWatchLater, setDetailFavUpdater, itemKey } from './catalog.js';
-import { playItem } from './player.js';
-import { navigate } from './router.js';
+import { isFav, toggleFav, isInWatchLater, toggleWatchLater, setDetailFavUpdater } from './catalog.js';
 
 let currentDetail = null;
 let detailSeason = 1;
@@ -60,7 +58,6 @@ export function openDetail(item, season) {
   currentDetail = item;
   const seasons = [...new Set((item.episodes || []).map(e => e.season).filter(n => n !== null && n !== undefined))].sort((a, b) => a - b);
   detailSeason = season || seasons[0] || 1;
-  const nextResolver = nextEpisodeResolver(item);
 
   const backdrop = document.getElementById('detailBackdrop');
   backdrop.style.backgroundImage = (item.backdrop || item.poster) ? `url(${item.backdrop || item.poster})` : '';
@@ -75,10 +72,10 @@ export function openDetail(item, season) {
     if (item.type === 'tv') {
       const eps = (item.episodes || []).filter(e => e.season === detailSeason);
       const ep = eps[0];
-      if (ep) playItem(item, ep, nextResolver);
+      if (ep) location.href = `ver.html?id=${encodeURIComponent(item.id)}&type=${item.type}&season=${ep.season}&episode=${ep.episode}`;
       else showToast('No hay episodios en esta temporada.', true);
     } else {
-      playItem(item, null, null);
+      location.href = `ver.html?id=${encodeURIComponent(item.id)}&type=${item.type}`;
     }
   };
   const seasonsTitle = document.getElementById('detailSeasonsTitle');
@@ -98,7 +95,7 @@ export function openDetail(item, season) {
     seasonsBox.querySelectorAll('.ep-item').forEach(btn => {
       btn.addEventListener('click', () => {
         const ep = { season: parseInt(btn.dataset.season), episode: parseInt(btn.dataset.episode), name: btn.querySelector('.ep-name').textContent };
-        playItem(item, ep, nextResolver);
+        location.href = `ver.html?id=${encodeURIComponent(item.id)}&type=${item.type}&season=${ep.season}&episode=${ep.episode}`;
       });
     });
   } else {
@@ -118,7 +115,6 @@ export function openDetail(item, season) {
   view._ot = setTimeout(() => view.classList.remove('opening'), 1400);
   document.body.style.overflow = 'hidden';
   document.getElementById('detailView').scrollTop = 0;
-  navigate(`/titulo/${encodeURIComponent(item.id)}/${item.type}`);
 }
 
 function renderEps(eps, item) {
@@ -157,5 +153,5 @@ export function closeDetail() {
     document.body.style.overflow = 'auto';
     currentDetail = null;
   }, 160);
-  if (location.pathname.startsWith('/titulo/')) history.back();
+  history.back();
 }

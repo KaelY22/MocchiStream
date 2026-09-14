@@ -77,7 +77,7 @@ La configuración del worker (binding D1, secretos) vive en `wrangler.toml`. La 
 │   ├── library.js        Favoritos / Historial / Ver después
 │   ├── detail.js         Detalle, temporadas, episodios, compartir
 │   ├── player.js         Reproductor propio / iframe + fuentes
-│   └── app.js            Boot, router, nav, deep links, admin modal
+│   └── app.js            Boot Explorar, PTR, deep links, admin modal
 └── worker/
     ├── worker.js         API del Worker
     └── wrangler.toml     Configuración del deploy

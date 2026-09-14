@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <title>MocchiStream</title>
+  <title>Buscar — MocchiStream</title>
   <meta name="theme-color" content="#0f0f1a" />
-  <meta name="description" content="Películas y series en streaming, sin cuentas y sin complicaciones." />
+  <meta name="description" content="Busca películas y series en MocchiStream." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" type="image/png" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -25,8 +25,15 @@
   </header>
 
   <main class="app-main">
-    <section id="view-explore" class="app-view">
-      <div id="homeSections"></div>
+    <section id="view-search" class="app-view">
+      <div class="search-panel">
+        <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="searchInput" class="input-glass" placeholder="Buscar películas o series..." autocomplete="nope" data-lpignore="true" spellcheck="false" />
+        <div class="search-chips" id="searchChips"></div>
+      </div>
+      <h2 class="search-view-head" id="searchHead">Resultados</h2>
+      <div id="searchGrid" class="video-grid"></div>
+      <div id="searchStatus" class="status-msg hidden"></div>
     </section>
   </main>
 
@@ -35,11 +42,11 @@
   </footer>
 
   <nav class="bottom-nav" id="bottomNav">
-    <a class="nav-item active" href="/" aria-label="Explorar">
+    <a class="nav-item" href="/" aria-label="Explorar">
       <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
       <span>Explorar</span>
     </a>
-    <a class="nav-item" href="buscar.html" aria-label="Buscar">
+    <a class="nav-item active" href="buscar.html" aria-label="Buscar">
       <span class="nav-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></span>
       <span>Buscar</span>
     </a>
@@ -62,10 +69,8 @@
     </div>
   </div>
 
-  <div id="ptrIndicator" class="ptr-indicator hidden"><span class="ptr-arrow">↓</span></div>
-
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app-search.js"></script>
 </body>
 </html>

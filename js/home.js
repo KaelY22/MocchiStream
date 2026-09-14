@@ -1,6 +1,5 @@
 import { API_BASE, esc } from './utils.js';
 import { cardHtml, getHistory } from './catalog.js';
-import { openDetailFromId } from './detail.js';
 
 export function loadHome() {
   const home = document.getElementById('homeSections');
@@ -77,7 +76,7 @@ function appendSection(home, sec, items, index) {
 
 export function renderContinueRow() {
   const home = document.getElementById('homeSections');
-  if (!home.dataset.loaded) return;
+  if (!home || !home.dataset.loaded) return;
   let row = document.getElementById('continueRow');
   const recent = getHistory().slice(0, 12);
   if (!recent.length) {
@@ -136,5 +135,3 @@ function loadSectionMore(sec, gridEl) {
     .catch(() => { gridEl.dataset.page = page - 1; })
     .finally(() => { sectionLoading = false; });
 }
-
-export { openDetailFromId };

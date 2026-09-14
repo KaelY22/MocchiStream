@@ -1091,6 +1091,7 @@ button { font-family: inherit; }
   border: none;
   color: var(--label-3);
   cursor: pointer;
+  text-decoration: none;
   transition: color var(--dur) ease;
 }
 .nav-ico {

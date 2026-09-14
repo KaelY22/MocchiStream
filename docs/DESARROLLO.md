@@ -47,7 +47,7 @@ MocchiStream/
 │   ├── library.js        → tabs Favoritos / Historial / Ver después
 │   ├── detail.js         → detalle full-screen, temporadas, episodios, compartir
 │   ├── player.js         → sheet de fuentes + reproductor propio/iframe + tags
-│   └── app.js            → boot, router, nav, PTR, deep link ?t=, admin modal
+│   └── app.js            → boot Explorar, PTR, deep link ?t=, admin modal
 └── worker/
     └── worker.js         → Worker actual (V4, proveedor único Pelispedia)
 ```
