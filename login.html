@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Iniciar sesión — MocchiStream</title>
+  <meta name="theme-color" content="#0f0f1a" />
+  <meta name="description" content="Inicia sesión o crea tu cuenta en MocchiStream." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script>try{var t=localStorage.getItem('ms_theme')==='light';document.documentElement.setAttribute('data-theme',t?'light':'dark');document.querySelector('meta[name="color-scheme"]').setAttribute('content',t?'light':'dark')}catch(e){}</script>
+</head>
+<body>
+
+  <header class="site-header header-floating">
+    <button class="menu-btn" id="menuBtn" aria-label="Abrir menú">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <a href="/" class="logo-link"><img src="icons/profile.png" alt="MocchiStream" class="logo" /></a>
+    <button class="theme-btn" id="themeBtn" aria-label="Cambiar tema"></button>
+  </header>
+
+  <main class="app-main">
+    <div class="login-screen">
+      <div class="login-card" id="authCard">
+        <img src="icons/profile.png" alt="" class="auth-logo" />
+        <h2 class="login-title" id="authTitle">Iniciar sesión</h2>
+        <p class="auth-sub" id="authSub">Bienvenido de vuelta a MocchiStream</p>
+        <div id="authError" class="error-msg hidden"></div>
+
+        <div class="auth-panels">
+          <form id="loginForm" class="auth-panel active" autocomplete="off" novalidate>
+            <div class="field" id="loginUserField">
+              <svg class="field-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              <input type="text" id="loginUser" class="input-glass" placeholder="Usuario" autocomplete="username" maxlength="20" required />
+            </div>
+            <div class="field" id="loginPassField">
+              <svg class="field-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <input type="password" id="loginPass" class="input-glass" placeholder="Contraseña" autocomplete="current-password" maxlength="64" required />
+              <button type="button" class="field-eye" data-eye="loginPass" aria-label="Mostrar contraseña">
+                <svg class="eye-on" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <svg class="eye-off" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <button type="submit" class="btn btn-neon w-full" id="loginSubmit">
+              <span class="btn-spinner"></span><span class="btn-label">Entrar</span>
+            </button>
+          </form>
+
+          <form id="regForm" class="auth-panel" autocomplete="off" novalidate>
+            <div class="field" id="regUserField">
+              <svg class="field-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              <input type="text" id="regUser" class="input-glass" placeholder="Usuario" autocomplete="username" maxlength="20" required />
+            </div>
+            <p class="field-msg hidden" id="regUserMsg">Mínimo 3 caracteres: letras, números o _</p>
+            <div class="field" id="regPassField">
+              <svg class="field-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <input type="password" id="regPass" class="input-glass" placeholder="Contraseña" autocomplete="new-password" maxlength="64" required />
+              <button type="button" class="field-eye" data-eye="regPass" aria-label="Mostrar contraseña">
+                <svg class="eye-on" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <svg class="eye-off" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <div class="req-list" id="reqList">
+              <span data-req="len"><span class="req-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg></span>Mínimo 8 caracteres</span>
+              <span data-req="upper"><span class="req-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg></span>Una mayúscula</span>
+              <span data-req="num"><span class="req-ico"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg></span>Un número</span>
+            </div>
+            <div class="field" id="regConfirmField">
+              <svg class="field-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              <input type="password" id="regConfirm" class="input-glass" placeholder="Repite la contraseña" autocomplete="new-password" maxlength="64" required />
+              <button type="button" class="field-eye" data-eye="regConfirm" aria-label="Mostrar contraseña">
+                <svg class="eye-on" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <svg class="eye-off" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <p class="field-msg hidden" id="regConfirmMsg">Las contraseñas no coinciden</p>
+            <button type="submit" class="btn btn-neon w-full" id="regSubmit">
+              <span class="btn-spinner"></span><span class="btn-label">Registrarme</span>
+            </button>
+          </form>
+        </div>
+
+        <p class="auth-switch" id="authSwitch">
+          ¿No tienes cuenta? <a href="#" id="toggleAuth">Regístrate</a>
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module">
+    import { applyTheme, setupMenu, registerSW } from './js/header.js';
+    import { isLoggedIn, setSession } from './js/auth.js';
+    import { API_BASE, showToast } from './js/utils.js';
+
+    applyTheme();
+    setupMenu();
+    registerSW();
+
+    if (isLoggedIn()) { location.href = '/'; }
+
+    const $ = id => document.getElementById(id);
+    const card = $('authCard');
+    const error = $('authError');
+    const title = $('authTitle');
+    const sub = $('authSub');
+    const switchText = $('authSwitch');
+    const loginPanel = $('loginForm');
+    const regPanel = $('regForm');
+    const loginSubmit = $('loginSubmit');
+    const regSubmit = $('regSubmit');
+
+    let isLogin = true;
+
+    function showError(msg) {
+      error.textContent = msg;
+      error.classList.remove('hidden');
+      card.classList.remove('auth-shake');
+      void card.offsetWidth;
+      card.classList.add('auth-shake');
+    }
+
+    function hideError() {
+      error.classList.add('hidden');
+    }
+
+    function switchMode() {
+      isLogin = !isLogin;
+      const out = isLogin ? regPanel : loginPanel;
+      const inn = isLogin ? loginPanel : regPanel;
+      out.classList.add('leaving');
+      setTimeout(() => {
+        out.classList.remove('active', 'leaving');
+        inn.classList.remove('active');
+        void inn.offsetWidth;
+        inn.classList.add('active');
+      }, 150);
+      title.textContent = isLogin ? 'Iniciar sesión' : 'Crear cuenta';
+      sub.textContent = isLogin ? 'Bienvenido de vuelta a MocchiStream' : 'Únete para sincronizar tu progreso';
+      switchText.innerHTML = isLogin
+        ? '¿No tienes cuenta? <a href="#" id="toggleAuth">Regístrate</a>'
+        : '¿Ya tienes cuenta? <a href="#" id="toggleAuth">Inicia sesión</a>';
+      hideError();
+    }
+
+    switchText.addEventListener('click', e => {
+      if (e.target.id === 'toggleAuth') { e.preventDefault(); switchMode(); }
+    });
+
+    document.querySelectorAll('.field-eye').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = $(btn.dataset.eye);
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.classList.toggle('visible', show);
+        btn.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+      });
+    });
+
+    const USER_RE = /^[a-zA-Z0-9_]+$/;
+    const reqs = { len: v => v.length >= 8, upper: v => /[A-Z]/.test(v), num: v => /[0-9]/.test(v) };
+
+    function setInvalid(field, on) {
+      field.classList.toggle('invalid', on);
+    }
+
+    function validateUser() {
+      const v = $('regUser').value;
+      const ok = v.length >= 3 && USER_RE.test(v);
+      setInvalid($('regUserField'), v.length > 0 && !ok);
+      $('regUserMsg').classList.toggle('hidden', ok || v.length === 0);
+      return ok;
+    }
+
+    function validatePass() {
+      const v = $('regPass').value;
+      let all = true;
+      Object.keys(reqs).forEach(k => {
+        const ok = reqs[k](v);
+        $('reqList').querySelector(`[data-req="${k}"]`).classList.toggle('ok', ok);
+        if (!ok) all = false;
+      });
+      setInvalid($('regPassField'), v.length > 0 && !all);
+      return all;
+    }
+
+    function validateConfirm() {
+      const ok = $('regConfirm').value === $('regPass').value && $('regConfirm').value.length > 0;
+      setInvalid($('regConfirmField'), $('regConfirm').value.length > 0 && !ok);
+      $('regConfirmMsg').classList.toggle('hidden', ok || $('regConfirm').value.length === 0);
+      return ok;
+    }
+
+    $('regUser').addEventListener('input', validateUser);
+    $('regPass').addEventListener('input', () => { validatePass(); validateConfirm(); });
+    $('regConfirm').addEventListener('input', validateConfirm);
+
+    function setLoading(btn, loading, label) {
+      btn.classList.toggle('loading', loading);
+      btn.querySelector('.btn-label').textContent = label;
+      btn.disabled = loading;
+    }
+
+    async function submitAuth(endpoint, username, password, btn, loadingLabel) {
+      hideError();
+      setLoading(btn, true, loadingLabel);
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { throw new Error(`Respuesta inválida (${res.status}): ${text.slice(0, 80)}`); }
+        if (!res.ok) {
+          if (res.status === 409 && endpoint === '/auth/register') {
+            error.innerHTML = `${data.error} <a href="#" id="goLogin">Inicia sesión</a>`;
+            error.classList.remove('hidden');
+            const go = $('goLogin');
+            if (go) go.addEventListener('click', e => { e.preventDefault(); switchMode(); });
+          } else {
+            showError(data.error || `Error ${res.status}`);
+          }
+          return;
+        }
+        setSession(data.token, data.username, data.isAdmin === true);
+        showToast(endpoint === '/auth/login' ? '¡Bienvenido!' : 'Cuenta creada');
+        setTimeout(() => location.href = '/', 400);
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(btn, false, endpoint === '/auth/login' ? 'Entrar' : 'Registrarme');
+      }
+    }
+
+    loginForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const user = $('loginUser').value.trim();
+      const pass = $('loginPass').value;
+      if (!user || !pass) {
+        showError('Escribe tu usuario y contraseña');
+        (!user ? $('loginUser') : $('loginPass')).focus();
+        return;
+      }
+      submitAuth('/auth/login', user, pass, loginSubmit, 'Entrando...');
+    });
+
+    regForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const user = $('regUser').value.trim();
+      const pass = $('regPass').value;
+      if (!validateUser()) { showError('El usuario debe tener mínimo 3 caracteres (letras, números o _)'); $('regUser').focus(); return; }
+      if (!validatePass()) { showError('La contraseña debe tener mínimo 8 caracteres, una mayúscula y un número'); $('regPass').focus(); return; }
+      if (!validateConfirm()) { showError('Las contraseñas no coinciden'); $('regConfirm').focus(); return; }
+      submitAuth('/auth/register', user, pass, regSubmit, 'Creando...');
+    });
+  </script>
+</body>
+</html>

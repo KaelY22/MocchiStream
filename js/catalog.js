@@ -1,4 +1,6 @@
 import { API_BASE, esc, safeImg, showToast, loadLS, saveLS, normTitle, PLACEHOLDER_SVG } from './utils.js';
+import { pushItem, removeItem, pullAll } from './sync.js';
+import { isLoggedIn } from './auth.js';
 
 let favs = [];
 let history = [];
@@ -18,6 +20,25 @@ export function loadLists() {
   history = cleanStale(loadLS('ms_history', []));
   watchLater = cleanStale(loadLS('ms_watchlater', []));
   migrateLegacyLists();
+  if (isLoggedIn()) {
+    pullAll().then(data => {
+      if (!data) return;
+      const hasAny = data.favorites.length || data.history.length || data.watch_later.length;
+      if (hasAny) {
+        favs = data.favorites;
+        history = data.history;
+        watchLater = data.watch_later;
+      } else if (favs.length || history.length || watchLater.length) {
+        favs.forEach(i => pushItem('favorites', i));
+        history.forEach(i => pushItem('history', i));
+        watchLater.forEach(i => pushItem('watch-later', i));
+      }
+      saveLS('ms_favs', favs);
+      saveLS('ms_history', history);
+      saveLS('ms_watchlater', watchLater);
+      notifyListChanged();
+    }).catch(() => {});
+  }
 }
 
 async function migrateLegacyLists() {
@@ -91,7 +112,8 @@ export function toggleFavFromCard(e, btn) {
     id: btn.dataset.id,
     type: btn.dataset.type || 'movie',
     title: btn.dataset.title || 'Sin título',
-    poster: btn.dataset.poster || null
+    poster: btn.dataset.poster || null,
+    anime: btn.dataset.anime === '1'
   });
 }
 
@@ -101,9 +123,11 @@ export function toggleFav(item) {
   if (idx >= 0) {
     favs.splice(idx, 1);
     showToast('Eliminado de favoritos');
+    removeItem('favorites', item);
   } else {
-    favs.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null });
+    favs.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null, anime: !!item.anime });
     showToast('Agregado a favoritos');
+    pushItem('favorites', item);
   }
   saveLS('ms_favs', favs);
   document.querySelectorAll('.fav-btn').forEach(btn => {
@@ -118,9 +142,11 @@ export function toggleWatchLater(item) {
   if (idx >= 0) {
     watchLater.splice(idx, 1);
     showToast('Eliminado de Ver después');
+    removeItem('watch-later', item);
   } else {
-    watchLater.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null });
+    watchLater.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null, anime: !!item.anime });
     showToast('Agregado a Ver después');
+    pushItem('watch-later', item);
   }
   saveLS('ms_watchlater', watchLater);
   notifyListChanged();
@@ -129,9 +155,10 @@ export function toggleWatchLater(item) {
 export function addHistory(item) {
   const k = itemKey(item);
   history = history.filter(h => itemKey(h) !== k);
-  history.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null, ts: Date.now() });
+  history.unshift({ id: item.id, type: item.type || 'movie', title: item.title, poster: item.poster || null, anime: !!item.anime, ts: Date.now() });
   if (history.length > 40) history = history.slice(0, 40);
   saveLS('ms_history', history);
+  pushItem('history', { id: item.id, type: item.type, title: item.title, poster: item.poster });
   notifyListChanged();
 }
 
@@ -148,6 +175,7 @@ export function updateProgress(item, pos, dur) {
     entry.durAt = Math.round(dur);
   }
   saveLS('ms_history', history);
+  pushItem('history', entry);
 }
 
 export function removeFromHistory(e, btn) {
@@ -155,6 +183,7 @@ export function removeFromHistory(e, btn) {
   const k = `${btn.dataset.type || 'movie'}|${btn.dataset.id}`;
   history = history.filter(h => itemKey(h) !== k);
   saveLS('ms_history', history);
+  removeItem('history', { id: btn.dataset.id, type: btn.dataset.type || 'movie' });
   notifyListChanged();
   showToast('Eliminado del historial');
 }
@@ -171,14 +200,14 @@ export function removeFromWatchLater(e, btn) {
 export function cardHtml(item, opts = {}) {
   const title = item.title || 'Sin título';
   const poster = safeImg(item.poster);
-  const typeLabel = item.type === 'tv' ? 'Serie' : 'Película';
+  const typeLabel = item.anime ? 'Anime' : (item.type === 'tv' ? 'Serie' : 'Película');
   const progress = (item.posAt && item.durAt && item.posAt > 0 && item.posAt < item.durAt * 0.93)
     ? `<div class="card-progress"><i style="width:${Math.min(100, Math.round(item.posAt / item.durAt * 100))}%"></i></div>`
     : '';
   return `
     <div class="video-card" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}">
-      ${opts.deletable ? `<button class="card-del" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}" onclick="${opts.deletable}(event, this)" aria-label="Eliminar">&times;</button>` : ''}
-      <button class="fav-btn ${isFav(item) ? 'on' : ''}" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}" data-title="${esc(title)}" data-poster="${esc(item.poster || '')}" onclick="toggleFavFromCard(event, this)" aria-label="Favorito">
+      ${opts.deletable ? `<button class="card-del" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}" onclick="${opts.deletable}(event, this)" aria-label="Eliminar"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.87 12.14A2 2 0 0116.14 21H7.86a2 2 0 01-1.99-1.86L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/></svg></button>` : ''}
+      <button class="fav-btn ${isFav(item) ? 'on' : ''}" data-id="${esc(item.id)}" data-type="${esc(item.type || 'movie')}" data-title="${esc(title)}" data-poster="${esc(item.poster || '')}" data-anime="${item.anime ? '1' : ''}" onclick="toggleFavFromCard(event, this)" aria-label="Favorito">
         <svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.9-10-9.3C.4 8.6 2.3 5 5.8 5c2 0 3.6 1.1 4.4 2.7h3.6C14.6 6.1 16.2 5 18.2 5c3.5 0 5.4 3.6 3.8 6.7C19.5 16.1 12 21 12 21z"/></svg>
       </button>
       <img src="${poster}" alt="${esc(title)}" loading="lazy" decoding="async" onerror="this.src='${esc(PLACEHOLDER_SVG)}'" />

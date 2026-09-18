@@ -1,4 +1,5 @@
 import { showToast } from './utils.js';
+import { setupAuth } from './auth.js';
 
 const THEME_KEY = 'ms_theme';
 const SUN_SVG = '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
@@ -100,6 +101,7 @@ export function setupMenu() {
   sidebar.querySelectorAll('a').forEach(a => a.addEventListener('click', close));
   const installBtn = document.getElementById('installBtn');
   if (installBtn) installBtn.addEventListener('click', close);
+  setupAuth();
 }
 
 export function setupSearch() {

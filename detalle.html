@@ -30,39 +30,44 @@
     <button class="theme-btn" id="themeBtn" aria-label="Cambiar tema"></button>
   </header>
 
-  <main class="app-main"></main>
+  <main class="app-main">
+    <div id="detailView" class="detail-view">
+      <div class="detail-backdrop" id="detailBackdrop"></div>
+      <div class="detail-topbar">
+        <button class="detail-round" onclick="closeDetail()" aria-label="Volver">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div class="detail-topbar-right">
+          <button class="detail-round" id="detailFavBtn" aria-label="Favorito"></button>
+          <button class="detail-round" id="detailWLBtn" aria-label="Ver después">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 4h14a1 1 0 011 1v15l-8-4.5L4 20V5a1 1 0 011-1z"/></svg>
+          </button>
+          <button class="detail-round" id="detailShareBtn" aria-label="Compartir">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M12 3v13m0-13 4 4m-4-4-4 4"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="detail-inner">
+        <h1 class="detail-title" id="detailTitle"></h1>
+        <div class="detail-badges" id="detailBadges"></div>
+        <p class="detail-desc" id="detailDesc"></p>
+        <div class="detail-actions">
+          <button class="btn-play" id="detailPlayBtn">
+            <span class="btn-play-ico"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>Reproducir
+          </button>
+          <button class="btn-dl hidden" id="detailDlBtn">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0 4-4m-4 4-4-4"/></svg>Descargar
+          </button>
+        </div>
+        <h3 class="detail-seasons-title" id="detailSeasonsTitle"></h3>
+        <div id="detailSeasons"></div>
+      </div>
+    </div>
+  </main>
 
   <footer class="site-footer">
     © 2026 · Hecho por Kael~
   </footer>
-
-  <div id="detailView" class="detail-view hidden">
-    <div class="detail-backdrop" id="detailBackdrop"></div>
-    <div class="detail-topbar">
-      <button class="detail-round" onclick="closeDetail()" aria-label="Volver">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
-      </button>
-      <button class="detail-round" id="detailFavBtn" aria-label="Favorito"></button>
-      <button class="detail-round" id="detailWLBtn" aria-label="Ver después">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 4h14a1 1 0 011 1v15l-8-4.5L4 20V5a1 1 0 011-1z"/></svg>
-      </button>
-      <button class="detail-round" id="detailShareBtn" aria-label="Compartir">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M12 3v13m0-13 4 4m-4-4-4 4"/></svg>
-      </button>
-    </div>
-    <div class="detail-inner">
-      <h1 class="detail-title" id="detailTitle"></h1>
-      <div class="detail-badges" id="detailBadges"></div>
-      <p class="detail-desc" id="detailDesc"></p>
-      <div class="detail-actions">
-        <button class="btn-play" id="detailPlayBtn">
-          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Reproducir
-        </button>
-      </div>
-      <h3 class="detail-seasons-title" id="detailSeasonsTitle"></h3>
-      <div id="detailSeasons"></div>
-    </div>
-  </div>
 
   <div id="toast" class="toast hidden"></div>
 

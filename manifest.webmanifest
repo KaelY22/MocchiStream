@@ -6,10 +6,13 @@
   "id": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "display_override": ["fullscreen", "standalone"],
+  "launch_handler": { "client_mode": "navigate-existing" },
   "background_color": "#0f0f1a",
   "theme_color": "#0f0f1a",
   "lang": "es",
+  "dir": "ltr",
+  "categories": ["entertainment", "video"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -22,6 +25,32 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Buscar",
+      "short_name": "Buscar",
+      "url": "/buscar.html",
+      "icons": [{ "src": "/icons/shortcuts/search.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Favoritos",
+      "short_name": "Favoritos",
+      "url": "/favoritos.html",
+      "icons": [{ "src": "/icons/shortcuts/heart.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Ver después",
+      "short_name": "Ver después",
+      "url": "/ver-despues.html",
+      "icons": [{ "src": "/icons/shortcuts/clock.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Playlists",
+      "short_name": "Playlists",
+      "url": "/playlist.html",
+      "icons": [{ "src": "/icons/shortcuts/list.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
   ]
 }

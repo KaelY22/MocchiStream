@@ -3,6 +3,9 @@ main = "worker/worker.js"
 compatibility_date = "2024-11-01"
 account_id = "b7ccd04fa7c5cd02effd43406b25e4a7"
 
+[triggers]
+crons = ["0 */6 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "mocchistream-db"

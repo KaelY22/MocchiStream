@@ -19,7 +19,7 @@ const GENRE_SECTIONS = [
 ];
 
 const HOME_SECTIONS = [
-  ['top10global', 'Top 10 Global'], ['top10mexico', 'Top 10 México'],
+  ['top10global', 'Top 10 Mejores'],
   ['popular', 'Netflix Popular'], ['top', 'Mejor Calificadas'],
   ['nuevos', 'Estrenos'], ['originales', 'Netflix Originales'],
   ['kdrama', 'K-Drama'], ['anime', 'Anime'],
@@ -34,8 +34,8 @@ export default {
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password'
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Password, Authorization'
     };
 
     if (method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -76,10 +76,49 @@ export default {
     if (path === '/api/avatar' && method === 'GET') {
       return handleGetAvatar(env, corsHeaders);
     }
+    if (path === '/api/playlists' && method === 'GET') {
+      return handlePublicPlaylists(env, corsHeaders);
+    }
+    if (path.startsWith('/api/playlists/') && method === 'GET') {
+      const id = path.split('/')[3];
+      if (!/^\d+$/.test(id || '')) return jsonResponse({ error: 'Invalid id' }, corsHeaders, 400);
+      return handlePublicPlaylist(id, env, corsHeaders);
+    }
+
+    if (path === '/api/auth/register' && method === 'POST') {
+      return handleRegister(request, env, corsHeaders);
+    }
+    if (path === '/api/auth/login' && method === 'POST') {
+      return handleLogin(request, env, corsHeaders);
+    }
+    if (path === '/api/auth/logout' && method === 'POST') {
+      return handleLogout(request, env, corsHeaders);
+    }
+    if (path === '/api/auth/me' && method === 'GET') {
+      return handleMe(request, env, corsHeaders);
+    }
+
+    if (path === '/api/sync/all' && method === 'GET') {
+      return handleSyncAll(request, env, corsHeaders);
+    }
+    if (path === '/api/sync/favorites' && (method === 'POST' || method === 'DELETE')) {
+      return method === 'POST' ? handleSyncAdd(request, env, corsHeaders, 'favorites') : handleSyncRemove(request, env, corsHeaders, 'favorites');
+    }
+    if (path === '/api/sync/history' && (method === 'POST' || method === 'DELETE')) {
+      return method === 'POST' ? handleSyncAdd(request, env, corsHeaders, 'history') : handleSyncRemove(request, env, corsHeaders, 'history');
+    }
+    if (path === '/api/sync/watch-later' && (method === 'POST' || method === 'DELETE')) {
+      return method === 'POST' ? handleSyncAdd(request, env, corsHeaders, 'watch_later') : handleSyncRemove(request, env, corsHeaders, 'watch_later');
+    }
 
     if (path.startsWith('/api/admin')) {
       const password = request.headers.get('X-Admin-Password');
-      if (password !== env.ADMIN_PASSWORD) {
+      let authorized = password === env.ADMIN_PASSWORD;
+      if (!authorized) {
+        const sessionUser = await getSessionUser(request, env);
+        authorized = !!(sessionUser && sessionUser.is_admin === 1);
+      }
+      if (!authorized) {
         const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
         if (adminRateLimited(ip)) {
           return jsonResponse({ error: 'Demasiados intentos. Espera 15 minutos.' }, corsHeaders, 429);
@@ -97,9 +136,61 @@ export default {
         if (method === 'POST') return handleUpdateAvatar(request, env, corsHeaders);
         if (method === 'DELETE') return handleDeleteAvatar(env, corsHeaders);
       }
+      if (path === '/api/admin/playlists' && method === 'GET') {
+        return handlePublicPlaylists(env, corsHeaders);
+      }
+      if (path === '/api/admin/playlists' && method === 'POST') {
+        return handleCreatePlaylist(request, env, corsHeaders);
+      }
+      if (/^\/api\/admin\/playlists\/\d+$/.test(path) && method === 'PATCH') {
+        return handleRenamePlaylist(path.split('/')[4], request, env, corsHeaders);
+      }
+      if (/^\/api\/admin\/playlists\/\d+$/.test(path) && method === 'DELETE') {
+        return handleDeletePlaylist(path.split('/')[4], env, corsHeaders);
+      }
+      if (/^\/api\/admin\/playlists\/\d+\/items$/.test(path) && method === 'POST') {
+        return handleAddPlaylistItem(path.split('/')[4], request, env, corsHeaders);
+      }
+      if (/^\/api\/admin\/playlists\/\d+\/items\/\d+$/.test(path) && method === 'DELETE') {
+        const parts = path.split('/');
+        return handleRemovePlaylistItem(parts[4], parts[6], env, corsHeaders);
+      }
+      if (path === '/api/admin/download-links' && method === 'PUT') {
+        return handleUpsertDownloadLink(request, env, corsHeaders);
+      }
     }
 
     return new Response('Not Found', { status: 404, headers: corsHeaders });
+  },
+
+  async scheduled(event, env, ctx) {
+    const key = env.TMDB_KEY || TMDB_KEY;
+    const sectionSlugs = HOME_SECTIONS.slice(0, 3);
+
+    for (const [slug, title] of sectionSlugs) {
+      try {
+        const items = await homeSection(slug, 1, env, key);
+        await cachePut('home/v10/' + encodeURIComponent(slug) + '/1', items, 86400, {}, env);
+      } catch (e) {}
+    }
+
+    const sections = [];
+    const seen = new Set();
+    for (const [slug, title] of sectionSlugs) {
+      try {
+        const items = await homeSection(slug, 1, env, key);
+        sections.push({
+          slug, title,
+          items: items.filter(it => {
+            const k = it.type + '|' + it.id;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          }).slice(0, 20)
+        });
+      } catch (e) {}
+    }
+    await cachePut('home/v10', { sections }, 86400, {}, env);
   }
 };
 
@@ -122,15 +213,17 @@ const STREAM_ALLOWED_HOSTS = [
   'filelions.to', 'embed69.org', 'xupalace.org', 'hglink.to', 'premilkyway.com',
   'savefiles.com', 'mwish.pro', 'dwish.pro', 'embedwish.com', 'wishembed.pro',
   'kswplayer.info', 'wishfast.top', 'streamwish.site', 'sfastwish.com', 'strwish.xyz',
-  'voe.sx', 'videoapp.zip', 'vidhidepro.com', 'morencius.com', 'minochinos.com',
+  'voe.sx', 'videoapp.zip', 'vidhidepro.com', 'vidhide.*', 'morencius.com', 'minochinos.com',
   'acek-cdn.com', 'dramiyos-cdn.com', 'cloudatacdn.com', 'pelispedia.is', 'pelispedia.mov',
   'cinecalidad.am', 'cinecalidad.ec', 'cinecalidad.run', 'seriesmetro.net', 'monoschinos.st',
-  'latanime.org', 'ok.ru', 'mp4upload.com',
+  'latanime.org', 'ok.ru', 'mp4upload.com', 'filemoon.sx', 'filemoon.top', 'filemoon.xyz',
+  'filemoon.fun', 'mixdrop.*', 'miixdrop.top', 'hqq.tv', 'hqq.to', 'yourupload.com',
+  'pdrain.*', 'pelisplushd.bz',
 ];
 
 const SITE_ALLOWED_HOSTS = [
   'cinecalidad.am', 'cinecalidad.ec', 'cinecalidad.run', 'pelispedia.is', 'pelispedia.mov',
-  'pelispedia.ink', 'seriesmetro.net', 'monoschinos.st', 'latanime.org',
+  'pelispedia.ink', 'seriesmetro.net', 'monoschinos.st', 'latanime.org', 'pelisplushd.bz',
 ];
 
 function hostAllowed(host, suffixes) {
@@ -280,7 +373,7 @@ function decodeEntities(str) {
 // ==================== TMDB ====================
 async function tmdbGet(path, params, env, key, ttl = 86400) {
   const qs = new URLSearchParams({ api_key: key, language: 'es-MX', ...params }).toString();
-  const cacheKey = 'tmdb/' + path + '?' + qs;
+  const cacheKey = 'tmdb/' + path.replace(/^\//, '') + '?' + qs;
   const hit = await cacheGet(cacheKey);
   if (hit) return hit.json();
   const res = await fetch(`${TMDB_BASE}${path}?${qs}`);
@@ -297,14 +390,19 @@ function toItem(r, netflix = true) {
   const isTv = r.media_type === 'tv' || r.name != null || r.first_air_date != null;
   const title = r.title || r.name || r.original_title || r.original_name || '';
   if (!title || !r.id) return null;
+  const genres = r.genre_ids || [];
   return {
     id: r.id,
     type: isTv ? 'tv' : 'movie',
     title,
     year: parseInt((r.release_date || r.first_air_date || '').slice(0, 4)) || null,
+    release_date: r.release_date || r.first_air_date || null,
+    anime: r.original_language === 'ja' && genres.includes(16),
     poster: imgUrl(r.poster_path, 'w342'),
     backdrop: imgUrl(r.backdrop_path, 'w780'),
     score: r.vote_average ? Math.round(r.vote_average * 10) / 10 : null,
+    vote_count: r.vote_count || 0,
+    popularity: r.popularity || 0,
     netflix,
   };
 }
@@ -336,8 +434,6 @@ async function homeSection(slug, page, env, key) {
   const now = new Date().getFullYear();
   switch (slug) {
     case 'top10global':
-      return fetchTop10(env, key);
-    case 'top10mexico':
       return fetchTop10(env, key);
     case 'popular':
       return discover('movie', page, {}, env, key).then(m => discover('tv', page, {}, env, key).then(t => m.concat(t)));
@@ -377,7 +473,7 @@ async function handleMainPage(url, env, corsHeaders, key) {
   const page = Math.max(1, parseInt(url.searchParams.get('page')) || 1);
 
   if (section) {
-    const cacheKey = 'home/v9/' + encodeURIComponent(section) + '/' + page;
+    const cacheKey = 'home/v10/' + encodeURIComponent(section) + '/' + page;
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
     try {
@@ -388,7 +484,7 @@ async function handleMainPage(url, env, corsHeaders, key) {
     }
   }
 
-  const cacheKey = 'home/v9';
+  const cacheKey = 'home/v10';
   const hit = await cacheGet(cacheKey);
   if (hit) return hit;
 
@@ -416,25 +512,25 @@ async function handleMainPage(url, env, corsHeaders, key) {
 }
 
 async function handleSearch(query, env, corsHeaders, key) {
-  const cacheKey = 'search/v6/' + encodeURIComponent(query.trim().toLowerCase());
+  const cacheKey = 'search/v9/' + encodeURIComponent(query.trim().toLowerCase());
   const hit = await cacheGet(cacheKey);
   if (hit) return hit;
   try {
-    const [movies, series] = await Promise.all([
-      tmdbGet('/search/movie', { query }, env, key, 3600),
-      tmdbGet('/search/tv', { query }, env, key, 3600),
-    ]);
+    const results = await Promise.all([1, 2].flatMap(p => [
+      tmdbGet('/search/movie', { query, page: p }, env, key, 3600),
+      tmdbGet('/search/tv', { query, page: p }, env, key, 3600),
+    ]));
     const seen = new Set();
     const items = [];
-    for (const r of [...(movies.results || []), ...(series.results || [])]) {
+    for (const r of results.flatMap(x => x.results || [])) {
       const it = toItem(r, false);
-      if (!it) continue;
+      if (!it || !it.poster || it.vote_count < 5) continue;
       const k = it.type + '|' + it.id;
       if (seen.has(k)) continue;
       seen.add(k);
       items.push(it);
     }
-    items.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    items.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
     return cachePut(cacheKey, items, 3600, corsHeaders, env);
   } catch (e) {
     return jsonResponse([], corsHeaders);
@@ -460,7 +556,7 @@ async function handleDetails(id, type, env, corsHeaders, key) {
       runtime: d.runtime || null,
       netflix: true,
       imdb: d.external_ids && d.external_ids.imdb_id || null,
-      anime: type === 'tv' && d.original_language === 'ja' && (d.genres || []).some(g => g.id === 16),
+      anime: d.original_language === 'ja' && (d.genres || []).some(g => g.id === 16),
     };
     if (type === 'tv') {
       const seasonsCount = d.number_of_seasons || 0;
@@ -480,6 +576,12 @@ async function handleDetails(id, type, env, corsHeaders, key) {
       });
       item.episodes = eps.sort((a, b) => a.season - b.season || a.episode - b.episode);
     }
+    const [downloads, inPlaylist] = await Promise.all([
+      env.DB.prepare('SELECT season, episode, url FROM download_links WHERE item_id = ? AND type = ? ORDER BY season, episode').bind(String(id), type).all(),
+      env.DB.prepare('SELECT 1 FROM playlist_items WHERE item_id = ? AND type = ? LIMIT 1').bind(String(id), type).first(),
+    ]);
+    item.downloads = downloads.results;
+    item.in_playlist = !!inPlaylist;
     return cachePut(cacheKey, item, 604800, corsHeaders, env);
   } catch (e) {
     return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
@@ -493,6 +595,13 @@ const FAST_PRIORITY = [
   /byse\w*\.(?:com|sx)/i,
   /streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash/i,
   /streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to|embedwish\.com|wishembed\.pro|hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|kswplayer\.info|wishfast\.top/i,
+  /filemoon\.(?:sx|top|xyz|fun)/i,
+  /vidhide\w*\.\w+|morencius\.com/i,
+  /mixdrop\w*\.\w+|miixdrop\.top/i,
+  /voe\.sx/i,
+  /hqq\.(?:tv|to)/i,
+  /mp4upload\.com/i,
+  /yourupload\.com/i,
   /goodstream\.one/i,
   /hlswish\.com/i,
   /uqload\.[a-z]+/i,
@@ -570,7 +679,7 @@ function extractPelispediaItems(html) {
     const type = /\/anime\//.test(link[1]) ? 'tv' : /\/pelicula\//.test(link[1]) ? 'movie' : 'tv';
     items.push({
       title,
-      url: link[1].startsWith('/') ? 'https://pelispedia.is' + link[1] : link[1],
+      url: link[1],
       type,
       year: yearMatch ? parseInt(yearMatch[1]) : null,
     });
@@ -669,11 +778,49 @@ function latanimeEpisodeLinks(html) {
   return links;
 }
 
+function extractPelisplushdItems(html) {
+  const items = [];
+  const re = /<a[^>]*href="([^"]*)"[^>]*class="Posters-link[^"]*"[^>]*data-title="([^"]*)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const dt = decodeEntities(m[2]).trim();
+    let title = dt.replace(/^VER\s+/i, '').replace(/\s+Online\s+Gratis\s+HD$/i, '').trim();
+    if (!title) continue;
+    const yearMatch = title.match(/\((\d{4})\)\s*$/);
+    const cleanTitle = yearMatch ? title.replace(/\s*\(\d{4}\)\s*$/, '').trim() : title;
+    const type = /\/serie\//.test(m[1]) || /\/anime\//.test(m[1]) ? 'tv' : 'movie';
+    items.push({ title: cleanTitle, url: m[1], type, year: yearMatch ? parseInt(yearMatch[1]) : null });
+  }
+  return items;
+}
+
+function pelisplushdEmbeds(html) {
+  const embeds = [];
+  for (const m of html.matchAll(/video\[\d+\]\s*=\s*['"]([^'"]+)['"]/gi)) {
+    if (/^https?:/.test(m[1])) embeds.push(m[1]);
+  }
+  for (const m of html.matchAll(/<iframe[^>]*src="([^"]+)"/gi)) {
+    if (/^https?:/.test(m[1])) embeds.push(m[1]);
+  }
+  return embeds;
+}
+
+function pelisplushdEpisodeLinks(html) {
+  const links = [];
+  const re = /href="([^"]*\/temporada\/(\d+)\/capitulo\/(\d+)[^"]*)"/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    links.push({ url: m[1], season: parseInt(m[2]), episode: parseInt(m[3]) });
+  }
+  return links;
+}
+
 const SITES = {
   movies: [
     {
       name: 'Cinecalidad',
-      searchUrl: q => `https://www.cinecalidad.ec/?s=${encodeURIComponent(q)}`,
+      domains: ['www.cinecalidad.ec', 'cinecalidad.am', 'cinecalidad.run'],
+      searchPath: q => `/?s=${encodeURIComponent(q)}`,
       parse: extractCinecalidadItems,
       embeds: cinecalidadEmbeds,
       episodeLinks: cinecalidadEpisodeLinks,
@@ -681,7 +828,8 @@ const SITES = {
     },
     {
       name: 'Pelispedia',
-      searchUrl: q => `https://pelispedia.is/?s=${encodeURIComponent(q)}`,
+      domains: ['pelispedia.is', 'pelispedia.mov', 'pelispedia.ink'],
+      searchPath: q => `/?s=${encodeURIComponent(q)}`,
       parse: extractPelispediaItems,
       embeds: pelispediaEmbeds,
       episodeLinks: pelispediaEpisodeLinks,
@@ -689,11 +837,12 @@ const SITES = {
       hasEpisodes: true,
     },
     {
-      name: 'SeriesMetro',
-      searchUrl: q => `https://www3.seriesmetro.net/?s=${encodeURIComponent(q)}`,
-      parse: extractPelispediaItems,
-      embeds: pelispediaEmbeds,
-      episodeLinks: pelispediaEpisodeLinks,
+      name: 'PelisPlusHD',
+      domains: ['pelisplushd.bz'],
+      searchPath: q => `/search?s=${encodeURIComponent(q)}`,
+      parse: extractPelisplushdItems,
+      embeds: pelisplushdEmbeds,
+      episodeLinks: pelisplushdEpisodeLinks,
       episodeUrl: (base) => base,
       hasEpisodes: true,
     },
@@ -701,7 +850,8 @@ const SITES = {
   anime: [
     {
       name: 'Monoschinos',
-      searchUrl: q => `https://monoschinos.st/buscar?q=${encodeURIComponent(q)}`,
+      domains: ['monoschinos.st'],
+      searchPath: q => `/buscar?q=${encodeURIComponent(q)}`,
       parse: extractMonoschinosItems,
       embeds: monoschinosEmbeds,
       episodeLinks: monoschinosEpisodeLinks,
@@ -710,7 +860,8 @@ const SITES = {
     },
     {
       name: 'LaTAnime',
-      searchUrl: q => `https://latanime.org/buscar?q=${encodeURIComponent(q)}`,
+      domains: ['latanime.org'],
+      searchPath: q => `/buscar?q=${encodeURIComponent(q)}`,
       parse: extractLatanimeItems,
       embeds: latanimeEmbeds,
       episodeLinks: latanimeEpisodeLinks,
@@ -753,18 +904,32 @@ async function resolveEmbed(embedUrl, deadline) {
   return null;
 }
 
+async function siteFetchHTML(site, path, timeout) {
+  let lastErr = null;
+  for (const domain of site.domains) {
+    try {
+      const url = `https://${domain}${path}`;
+      if (!assertSafeUrl(url, SITE_ALLOWED_HOSTS)) continue;
+      return { html: await fetchHTML(url, timeout, SITE_ALLOWED_HOSTS), base: `https://${domain}` };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Sitio caído');
+}
+
 async function trySite(site, query, queryBase, season, episode, deadline, type) {
   let items = [];
   try {
-    const html = await fetchHTML(site.searchUrl(query), 4000, SITE_ALLOWED_HOSTS);
-    items = site.parse(html);
+    const { html, base } = await siteFetchHTML(site, site.searchPath(query), 4000);
+    items = site.parse(html).map(it => ({ ...it, url: /^https?:/.test(it.url) ? it.url : base + it.url }));
   } catch (e) {
     return [];
   }
   if (!items.length && queryBase && queryBase !== query && Date.now() < deadline) {
     try {
-      const html = await fetchHTML(site.searchUrl(queryBase), 4000, SITE_ALLOWED_HOSTS);
-      items = site.parse(html);
+      const { html, base } = await siteFetchHTML(site, site.searchPath(queryBase), 4000);
+      items = site.parse(html).map(it => ({ ...it, url: /^https?:/.test(it.url) ? it.url : base + it.url }));
     } catch (e) {}
   }
   if (!items.length) return [];
@@ -815,8 +980,15 @@ async function handlePlay(url, env, corsHeaders) {
   const query = year ? `${title} ${year}` : title;
   const queryBase = title;
 
-  const embedsList = await mapLimit(sites, sites.length, site => trySite(site, query, queryBase, season, episode, deadline, anime ? 'tv' : type));
-  const embeds = embedsList.flat();
+  const siteFns = sites.map(site => trySite(site, query, queryBase, season, episode, deadline, anime ? 'tv' : type));
+  const firstEmbeds = await siteFns[0];
+  let embeds;
+  if (firstEmbeds.some(u => fastRank(u) !== -1)) {
+    embeds = firstEmbeds;
+  } else {
+    const rest = await Promise.allSettled(siteFns.slice(1));
+    embeds = [firstEmbeds, ...rest.map(r => r.status === 'fulfilled' ? r.value : [])].flat();
+  }
   const sorted = sortEmbeds(embeds);
   const firstIframe = sorted.find(u => fastRank(u) === -1) || null;
   const fasts = sorted.filter(u => fastRank(u) !== -1).slice(0, 4);
@@ -839,6 +1011,14 @@ const STREAM_HOSTS = [
   { re: /byse\w*\.(?:com|sx)/i, fn: extractByse },
   { re: /(?:streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash)/i, fn: extractStreamTape },
   { re: /(?:hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|embedwish\.com|wishembed\.pro|kswplayer\.info|wishfast\.top|streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to)/i, fn: extractStreamWish },
+  { re: /filemoon\.(?:sx|top|xyz|fun)/i, fn: extractFilemoon },
+  { re: /vidhide\w*\.\w+|morencius\.com/i, fn: extractVidhide },
+  { re: /mixdrop\w*\.\w+|miixdrop\.top/i, fn: extractMixdrop },
+  { re: /voe\.sx/i, fn: extractVoe },
+  { re: /hqq\.(?:tv|to)/i, fn: extractHqq },
+  { re: /mp4upload\.com/i, fn: extractMp4upload },
+  { re: /yourupload\.com/i, fn: extractYourUpload },
+  { re: /embed69\.org/i, fn: extractEmbed69 },
 ];
 
 function b64UrlDecode(str) {
@@ -930,7 +1110,7 @@ async function extractByse(url) {
   });
   if (!playbackRes.ok) return null;
   const playback = (await playbackRes.json()).playback;
-  if (!playback || !playback.key_parts) return null;
+  if (!playback || !playback.key_parts || playback.key_parts.length < 2) return null;
   const keyBytes = new Uint8Array([...b64UrlDecode(playback.key_parts[0]), ...b64UrlDecode(playback.key_parts[1])]);
   const iv = b64UrlDecode(playback.iv);
   const payload = b64UrlDecode(playback.payload);
@@ -969,6 +1149,172 @@ async function extractStreamWish(url) {
   const found = findStreamUrl(unpacked) || findStreamUrl(html);
   if (found) return { ...found, referer: new URL(target).origin };
   return null;
+}
+
+async function extractFilemoon(url) {
+  const codeMatch = url.match(/\/[ed]\/([^\/\s]+)\/?$/i);
+  if (!codeMatch) return null;
+  const origin = new URL(url).origin;
+  const res = await fetchSafe(`${origin}/api/videos/${codeMatch[1]}`, {
+    allowed: STREAM_ALLOWED_HOSTS,
+    timeout: 8000,
+    headers: { 'User-Agent': USER_AGENT, 'Referer': url }
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data || data.error !== undefined || !data.playback) return null;
+  const playback = data.playback;
+  if (!playback.key_parts || playback.key_parts.length !== 2 || !playback.payload) return null;
+  const keyBytes = new Uint8Array([...b64UrlDecode(playback.key_parts[0]), ...b64UrlDecode(playback.key_parts[1])]);
+  if (keyBytes.length !== 32) return null;
+  const iv = b64UrlDecode(playback.iv);
+  const payload = b64UrlDecode(playback.payload);
+  let decrypted;
+  try {
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+    decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, payload);
+  } catch (e) {
+    return null;
+  }
+  let jsonStr = new TextDecoder().decode(decrypted);
+  if (jsonStr.startsWith('\uFEFF')) jsonStr = jsonStr.slice(1);
+  const root = JSON.parse(jsonStr);
+  const hls = (root.sources || []).find(s => s.mime_type === 'application/vnd.apple.mpegurl');
+  if (!hls || !hls.url) return null;
+  return { type: 'hls', url: hls.url, referer: url };
+}
+
+async function extractVidhide(url) {
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const unpacked = unpackPacker(html);
+  const sources = [];
+  const matches = unpacked.matchAll(/["'](hls4|hls3|hls2)["']\s*:\s*["']([^"']+)["']/g);
+  for (const m of matches) {
+    const u = new URL(m[2], url).href;
+    if (u.includes('.m3u8')) sources.push({ url: u, priority: parseInt(m[1].slice(-1)) });
+  }
+  if (!sources.length) return null;
+  sources.sort((a, b) => b.priority - a.priority);
+  return { type: 'hls', url: sources[0].url, referer: url };
+}
+
+async function extractMixdrop(url) {
+  if (url.includes('club')) url = url.replace('club', 'ps').split('/2')[0];
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const unpacked = unpackPacker(html);
+  const m3u8 = unpacked.match(/https:\/\/[^"']+?\.m3u8[^"']*/i);
+  if (m3u8) return { type: 'hls', url: m3u8[0], referer: url };
+  const wurl = unpacked.match(/MDCore\.wurl\s*=\s*"([^"]+)"/);
+  if (wurl) {
+    let u = wurl[1];
+    if (u.startsWith('//')) u = 'https:' + u;
+    if (!/^https?:/.test(u)) u = new URL(u, url).href;
+    return { type: u.includes('.m3u8') ? 'hls' : 'mp4', url: u, referer: url };
+  }
+  return null;
+}
+
+async function extractVoe(url) {
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const redirect = html.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
+  const target = redirect ? redirect[1] : url;
+  const finalHtml = redirect ? await fetchHTML(target, STREAM_TIMEOUT) : html;
+  const patterns = [
+    /sources?\s*:\s*\[\s*\{[^}]*src\s*:\s*["']([^"']+)["']/i,
+    /"file"\s*:\s*"([^"]+)"/i,
+    /(https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)[^\s"'<>]*)/i,
+  ];
+  for (const p of patterns) {
+    const m = finalHtml.match(p);
+    if (!m || !m[1]) continue;
+    const u = m[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/').replace(/&amp;/g, '&').trim();
+    if (/\.(?:mp4|m3u8)/i.test(u)) return { type: u.includes('.m3u8') ? 'hls' : 'mp4', url: u, referer: target };
+  }
+  return null;
+}
+
+async function extractHqq(url) {
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const patterns = [
+    /sources?\s*:\s*\[\s*\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)["']/i,
+    /file\s*:\s*"([^"]+\.mp4[^"]*)"/i,
+    /video(?:\d+)?\s*=\s*["']([^"']+\.mp4[^"']+)["']/i,
+  ];
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m && m[1]) return { type: m[1].includes('.m3u8') ? 'hls' : 'mp4', url: m[1], referer: url };
+  }
+  return null;
+}
+
+async function extractMp4upload(url) {
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const m = html.match(/<script(?:.|\n)+?src:(?:.|\n)*?"(.+?\.mp4)"/);
+  if (!m) return null;
+  return { type: 'mp4', url: m[1], referer: url };
+}
+
+async function extractYourUpload(url) {
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const meta = html.match(/property\s*=\s*"og:video"[\s\S]*?content\s*=\s*"(\S+)"/i);
+  if (!meta || meta[1] === '/embed/novideo.mp4') return null;
+  return { type: 'mp4', url: meta[1], referer: 'https://yourupload.com' };
+}
+
+async function sha256Hex(text) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256Bytes(text) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+}
+
+async function decryptAesCbc(encryptedBase64, aesKey) {
+  const raw = b64UrlDecode(encryptedBase64);
+  if (raw.length <= 16) return null;
+  const iv = raw.slice(0, 16);
+  const ciphertext = raw.slice(16);
+  const key = await crypto.subtle.importKey('raw', aesKey.slice(0, 32), { name: 'AES-CBC' }, false, ['decrypt']);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, ciphertext);
+  return new TextDecoder().decode(decrypted);
+}
+
+async function extractEmbed69(url) {
+  const html = await fetchHTML(url, STREAM_TIMEOUT);
+  const challenge = html.match(/const\s+POW_CHALLENGE\s*=\s*['"]([^'"]+)['"]/);
+  const difficulty = html.match(/const\s+POW_DIFFICULTY\s*=\s*(\d+)/);
+  const salt = html.match(/const\s+POW_SALT\s*=\s*['"]([^'"]+)['"]/);
+  const data = html.match(/let\s+dataLink\s*=\s*(\[[\s\S]*?\]);/);
+  if (!challenge || !difficulty || !salt || !data) return null;
+  let dataLink;
+  try { dataLink = JSON.parse(data[1]); } catch (e) { return null; }
+  const target = '0'.repeat(parseInt(difficulty[1]));
+  let aesKey = null;
+  for (let nonce = 0; nonce < 10000; nonce++) {
+    const hash = await sha256Hex(challenge[1] + nonce);
+    if (hash.startsWith(target)) {
+      aesKey = await sha256Bytes(challenge[1] + nonce + salt[1]);
+      break;
+    }
+  }
+  if (!aesKey) return null;
+  const links = [];
+  for (const file of dataLink) {
+    for (const list of [file && file.sortedEmbeds, file && file.downloadEmbeds]) {
+      if (!Array.isArray(list)) continue;
+      for (const embed of list) {
+        if (!embed || !embed.link) continue;
+        try {
+          const decrypted = await decryptAesCbc(embed.link, aesKey);
+          if (decrypted && /^https?:/.test(decrypted)) links.push(decrypted);
+        } catch (e) {}
+      }
+    }
+  }
+  if (!links.length) return null;
+  const m3u8 = links.find(u => u.includes('.m3u8')) || links[0];
+  return { type: m3u8.includes('.m3u8') ? 'hls' : 'mp4', url: m3u8, referer: url };
 }
 
 async function tryHostExtractors(targetUrl) {
@@ -1295,6 +1641,151 @@ async function handleDeleteAvatar(env, corsHeaders) {
   }
 }
 
+async function handlePublicPlaylists(env, corsHeaders) {
+  try {
+    const { results } = await env.DB.prepare(
+      'SELECT p.id, p.name, p.cover, COUNT(i.id) AS count FROM playlists p LEFT JOIN playlist_items i ON i.playlist_id = p.id GROUP BY p.id ORDER BY p.name COLLATE NOCASE ASC, p.id ASC'
+    ).all();
+    return jsonResponse({ playlists: results }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+async function handlePublicPlaylist(id, env, corsHeaders) {
+  try {
+    const pl = await env.DB.prepare('SELECT id, name, cover FROM playlists WHERE id = ?').bind(id).first();
+    if (!pl) return jsonResponse({ error: 'Playlist no encontrada' }, corsHeaders, 404);
+    const { results } = await env.DB.prepare(
+      'SELECT id, item_id, type, title, poster, release_date, anime FROM playlist_items WHERE playlist_id = ? ORDER BY release_date IS NULL, release_date ASC, position, id'
+    ).bind(id).all();
+    return jsonResponse({ playlist: { ...pl, items: results } }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+function cleanCover(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  if (v.length > 500) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  } catch (e) { return null; }
+  return v;
+}
+
+async function handleCreatePlaylist(request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const name = String(body.name || '').trim();
+  if (!name || name.length > 60) return jsonResponse({ error: 'Nombre inválido' }, corsHeaders, 400);
+  const cover = cleanCover(body.cover);
+  if (body.cover && cover === null) return jsonResponse({ error: 'URL de portada inválida' }, corsHeaders, 400);
+  try {
+    const res = await env.DB.prepare('INSERT INTO playlists (name, cover) VALUES (?, ?)').bind(name, cover).run();
+    return jsonResponse({ success: true, id: res.meta.last_row_id }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+async function handleRenamePlaylist(id, request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const name = String(body.name || '').trim();
+  if (!name || name.length > 60) return jsonResponse({ error: 'Nombre inválido' }, corsHeaders, 400);
+  try {
+    if (body.cover === undefined) {
+      await env.DB.prepare('UPDATE playlists SET name = ? WHERE id = ?').bind(name, id).run();
+    } else {
+      const cover = cleanCover(body.cover);
+      if (body.cover && cover === null) return jsonResponse({ error: 'URL de portada inválida' }, corsHeaders, 400);
+      await env.DB.prepare('UPDATE playlists SET name = ?, cover = ? WHERE id = ?').bind(name, cover, id).run();
+    }
+    return jsonResponse({ success: true }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+async function handleDeletePlaylist(id, env, corsHeaders) {
+  try {
+    await env.DB.prepare('DELETE FROM playlist_items WHERE playlist_id = ?').bind(id).run();
+    await env.DB.prepare('DELETE FROM playlists WHERE id = ?').bind(id).run();
+    return jsonResponse({ success: true }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+async function handleAddPlaylistItem(id, request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const itemId = String(body.item_id || '');
+  const type = body.type === 'tv' ? 'tv' : 'movie';
+  const title = String(body.title || '').trim();
+  if (!itemId || !title) return jsonResponse({ error: 'Item inválido' }, corsHeaders, 400);
+  try {
+    const exists = await env.DB.prepare(
+      'SELECT id FROM playlist_items WHERE playlist_id = ? AND item_id = ? AND type = ?'
+    ).bind(id, itemId, type).first();
+    if (exists) return jsonResponse({ error: 'Ya está en la playlist' }, corsHeaders, 409);
+    const cnt = await env.DB.prepare('SELECT COUNT(*) c FROM playlist_items WHERE playlist_id = ?').bind(id).first();
+    if (cnt.c >= 50) return jsonResponse({ error: 'Máximo 50 títulos por playlist' }, corsHeaders, 400);
+    const poster = body.poster ? String(body.poster).slice(0, 500) : null;
+    const releaseDate = body.release_date ? String(body.release_date).slice(0, 20) : null;
+    const anime = body.anime ? 1 : 0;
+    const res = await env.DB.prepare(
+      'INSERT INTO playlist_items (playlist_id, item_id, type, title, poster, release_date, anime, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, itemId, type, title.slice(0, 200), poster, releaseDate, anime, cnt.c).run();
+    return jsonResponse({ success: true, id: res.meta.last_row_id }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+async function handleRemovePlaylistItem(pid, iid, env, corsHeaders) {
+  try {
+    await env.DB.prepare('DELETE FROM playlist_items WHERE id = ? AND playlist_id = ?').bind(iid, pid).run();
+    return jsonResponse({ success: true }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
+async function handleUpsertDownloadLink(request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const itemId = String(body.item_id || '');
+  const type = body.type === 'tv' ? 'tv' : 'movie';
+  const season = parseInt(body.season) || 0;
+  const episode = parseInt(body.episode) || 0;
+  const url = String(body.url || '').trim();
+  if (!itemId) return jsonResponse({ error: 'Item inválido' }, corsHeaders, 400);
+  if (url) {
+    if (url.length > 500) return jsonResponse({ error: 'URL muy larga' }, corsHeaders, 400);
+    try {
+      const u = new URL(url);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return jsonResponse({ error: 'URL inválida' }, corsHeaders, 400);
+    } catch (e) { return jsonResponse({ error: 'URL inválida' }, corsHeaders, 400); }
+  }
+  try {
+    if (!url) {
+      await env.DB.prepare('DELETE FROM download_links WHERE item_id = ? AND type = ? AND season = ? AND episode = ?').bind(itemId, type, season, episode).run();
+    } else {
+      await env.DB.prepare(
+        'INSERT INTO download_links (item_id, type, season, episode, url) VALUES (?, ?, ?, ?, ?) ON CONFLICT(item_id, type, season, episode) DO UPDATE SET url = excluded.url'
+      ).bind(itemId, type, season, episode, url).run();
+    }
+    await caches.default.delete(new Request(CACHE_HOST + '/details/v2/' + type + '/' + encodeURIComponent(itemId)));
+    return jsonResponse({ success: true }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
+  }
+}
+
 async function handleAdminStats(env, corsHeaders) {
   const [sSearch, sHome, sOther, sTmdb] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) c FROM cache_keys WHERE key LIKE 'search/%'").first(),
@@ -1321,14 +1812,154 @@ async function handleCachePurge(request, env, corsHeaders) {
     : scope === 'search' ? " WHERE key LIKE 'search/%'"
     : scope === 'home' ? " WHERE key LIKE 'home/%'"
     : " WHERE key LIKE 'tmdb/%'";
-  const { results } = await env.DB.prepare('SELECT key FROM cache_keys' + where).all();
-  let deleted = 0;
-  for (const row of results) {
-    if (deleted >= 500) break;
-    await caches.default.delete(new Request(CACHE_HOST + '/' + row.key));
-    deleted++;
+  try {
+    const { results } = await env.DB.prepare('SELECT key FROM cache_keys' + where).all();
+    let deleted = 0;
+    let failed = 0;
+    for (const row of results) {
+      if (deleted + failed >= 500) break;
+      try {
+        if (await caches.default.delete(new Request(CACHE_HOST + '/' + row.key))) deleted++;
+      } catch (e) { failed++; }
+    }
+    await env.DB.prepare('DELETE FROM cache_keys' + where).run();
+    const staleKeys = await env.DB.prepare("SELECT key FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").all();
+    for (const row of (staleKeys.results || [])) {
+      try { await caches.default.delete(new Request(CACHE_HOST + '/' + row.key)); } catch (e) {}
+    }
+    const stale = await env.DB.prepare("DELETE FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").run();
+    return jsonResponse({ success: true, deleted, failed, stale: stale.meta.changes || 0 }, corsHeaders);
+  } catch (e) {
+    return jsonResponse({ error: 'Purge failed: ' + String(e && e.message || e) }, corsHeaders, 500);
   }
-  await env.DB.prepare('DELETE FROM cache_keys' + where).run();
-  const stale = await env.DB.prepare("DELETE FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").run();
-  return jsonResponse({ success: true, deleted, stale: stale.meta.changes || 0 }, corsHeaders);
+}
+
+// ==================== AUTH ====================
+const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+function toHex(bytes) {
+  return [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function randHex(n) {
+  const bytes = new Uint8Array(n);
+  crypto.getRandomValues(bytes);
+  return toHex(bytes);
+}
+
+async function hashPassword(password, salt) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 100000, hash: 'SHA-256' },
+    key, 256
+  );
+  return toHex(bits);
+}
+
+async function createSession(userId, env) {
+  const token = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').bind(token, userId).run();
+  return token;
+}
+
+async function getSessionUser(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return null;
+  const row = await env.DB.prepare(
+    'SELECT s.user_id, u.username, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'
+  ).bind(token).first();
+  return row || null;
+}
+
+async function handleRegister(request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const username = String(body.username || '').trim();
+  const password = String(body.password || '');
+  if (!USERNAME_RE.test(username)) return jsonResponse({ error: 'Usuario: 3-20 caracteres alfanuméricos o _' }, corsHeaders, 400);
+  if (password.length < 6) return jsonResponse({ error: 'La contraseña debe tener al menos 6 caracteres' }, corsHeaders, 400);
+  const exists = await env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first();
+  if (exists) return jsonResponse({ error: 'Ese nombre de usuario ya está en uso. Prueba iniciar sesión o elige otro.' }, corsHeaders, 409);
+  const salt = randHex(16);
+  const hash = await hashPassword(password, salt);
+  const isAdmin = username.toLowerCase() === String(env.ADMIN_USERNAME || 'kael').toLowerCase() ? 1 : 0;
+  const res = await env.DB.prepare('INSERT INTO users (username, password_hash, password_salt, is_admin) VALUES (?, ?, ?, ?)').bind(username, hash, salt, isAdmin).run();
+  const token = await createSession(res.meta.last_row_id, env);
+  return jsonResponse({ success: true, token, username, isAdmin: isAdmin === 1 }, corsHeaders, 201);
+}
+
+async function handleLogin(request, env, corsHeaders) {
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const username = String(body.username || '').trim();
+  const password = String(body.password || '');
+  const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
+  if (!user) return jsonResponse({ error: 'Usuario o contraseña incorrectos' }, corsHeaders, 401);
+  const hash = await hashPassword(password, user.password_salt);
+  if (hash !== user.password_hash) return jsonResponse({ error: 'Usuario o contraseña incorrectos' }, corsHeaders, 401);
+  const token = await createSession(user.id, env);
+  return jsonResponse({ success: true, token, username: user.username, isAdmin: user.is_admin === 1 }, corsHeaders);
+}
+
+async function handleLogout(request, env, corsHeaders) {
+  const auth = request.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (token) await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+  return jsonResponse({ success: true }, corsHeaders);
+}
+
+async function handleMe(request, env, corsHeaders) {
+  const user = await getSessionUser(request, env);
+  if (!user) return jsonResponse({ error: 'No autorizado' }, corsHeaders, 401);
+  return jsonResponse({ username: user.username, isAdmin: user.is_admin === 1 }, corsHeaders);
+}
+
+// ==================== SYNC ====================
+async function handleSyncAll(request, env, corsHeaders) {
+  const user = await getSessionUser(request, env);
+  if (!user) return jsonResponse({ error: 'No autorizado' }, corsHeaders, 401);
+  const [favs, hist, wl] = await Promise.all([
+    env.DB.prepare('SELECT item_id id, type, title, poster FROM user_favorites WHERE user_id = ? ORDER BY created_at DESC').bind(user.user_id).all(),
+    env.DB.prepare('SELECT item_id id, type, title, poster, season, episode, position AS posAt, duration AS durAt, updated_at AS ts FROM user_history WHERE user_id = ? ORDER BY updated_at DESC').bind(user.user_id).all(),
+    env.DB.prepare('SELECT item_id id, type, title, poster FROM user_watch_later WHERE user_id = ? ORDER BY created_at DESC').bind(user.user_id).all(),
+  ]);
+  return jsonResponse({ favorites: favs.results, history: hist.results, watch_later: wl.results }, corsHeaders);
+}
+
+async function handleSyncAdd(request, env, corsHeaders, kind) {
+  const user = await getSessionUser(request, env);
+  if (!user) return jsonResponse({ error: 'No autorizado' }, corsHeaders, 401);
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const itemId = parseInt(body.item_id ?? body.id, 10);
+  const type = body.type === 'tv' ? 'tv' : 'movie';
+  if (!itemId || isNaN(itemId)) return jsonResponse({ error: 'Invalid item' }, corsHeaders, 400);
+  const title = String(body.title || '').slice(0, 200);
+  const poster = String(body.poster || '').slice(0, 300);
+  if (kind === 'favorites') {
+    await env.DB.prepare('INSERT OR IGNORE INTO user_favorites (user_id, item_id, type, title, poster) VALUES (?, ?, ?, ?, ?)').bind(user.user_id, itemId, type, title, poster).run();
+  } else if (kind === 'watch_later') {
+    await env.DB.prepare('INSERT OR IGNORE INTO user_watch_later (user_id, item_id, type, title, poster) VALUES (?, ?, ?, ?, ?)').bind(user.user_id, itemId, type, title, poster).run();
+  } else {
+    const season = parseInt(body.season, 10) || 0;
+    const episode = parseInt(body.episode, 10) || 0;
+    const position = parseInt(body.posAt ?? body.position, 10) || 0;
+    const duration = parseInt(body.durAt ?? body.duration, 10) || 0;
+    await env.DB.prepare('INSERT OR REPLACE INTO user_history (user_id, item_id, type, title, poster, season, episode, position, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(user.user_id, itemId, type, title, poster, season, episode, position, duration).run();
+  }
+  return jsonResponse({ success: true }, corsHeaders);
+}
+
+async function handleSyncRemove(request, env, corsHeaders, kind) {
+  const user = await getSessionUser(request, env);
+  if (!user) return jsonResponse({ error: 'No autorizado' }, corsHeaders, 401);
+  let body;
+  try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
+  const itemId = parseInt(body.item_id ?? body.id, 10);
+  const type = body.type === 'tv' ? 'tv' : 'movie';
+  if (!itemId || isNaN(itemId)) return jsonResponse({ error: 'Invalid item' }, corsHeaders, 400);
+  const table = kind === 'favorites' ? 'user_favorites' : kind === 'watch_later' ? 'user_watch_later' : 'user_history';
+  await env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ? AND item_id = ? AND type = ?`).bind(user.user_id, itemId, type).run();
+  return jsonResponse({ success: true }, corsHeaders);
 }

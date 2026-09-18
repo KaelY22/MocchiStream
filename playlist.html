@@ -31,12 +31,15 @@
   </header>
 
   <main class="app-main">
-    <section class="app-view">
-      <div class="empty-state" style="padding-top:4rem;">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 1.5-4.5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></svg>
-        <h2 class="search-view-head" style="margin-bottom:0.4rem;">Playlists</h2>
-        <p>Próximamente podrás crear tus propias listas.</p>
-      </div>
+    <section id="view-playlists" class="app-view">
+      <h2 class="search-view-head">Playlists</h2>
+      <div id="playlistsGrid" class="playlist-grid"></div>
+    </section>
+    <section id="view-playlist-detail" class="app-view hidden">
+      <button onclick="backToPlaylists()" class="btn btn-ghost btn-small" style="margin-bottom:0.8rem;">← Volver</button>
+      <img id="plDetailCover" class="pl-detail-cover hidden" alt="" />
+      <h2 class="search-view-head" id="playlistDetailTitle"></h2>
+      <div id="plItemsGrid" class="video-grid"></div>
     </section>
   </main>
 

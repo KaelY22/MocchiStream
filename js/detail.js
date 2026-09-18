@@ -20,6 +20,8 @@ export function fetchItem(id, type) {
         year: details.year || null,
         score: details.score || null,
         anime: !!details.anime,
+        downloads: details.downloads || [],
+        in_playlist: !!details.in_playlist,
         episodes: details.episodes || []
       };
     });
@@ -63,7 +65,7 @@ export function openDetail(item, season) {
   const bgUrl = safeImg(item.backdrop || item.poster);
   backdrop.style.backgroundImage = bgUrl !== PLACEHOLDER_SVG ? `url(${bgUrl})` : '';
   document.getElementById('detailTitle').textContent = item.title;
-  const badges = [item.type === 'tv' ? 'Serie' : 'Película'];
+  const badges = [item.anime ? 'Anime' : (item.type === 'tv' ? 'Serie' : 'Película')];
   if (item.year) badges.push(String(item.year));
   if (item.score) badges.push(`★ ${item.score}`);
   document.getElementById('detailBadges').innerHTML = badges.map(b => `<span class="detail-badge">${esc(b)}</span>`).join('');
@@ -79,6 +81,17 @@ export function openDetail(item, season) {
       location.href = `ver.html?id=${encodeURIComponent(item.id)}&type=${item.type}`;
     }
   };
+  const dlBtn = document.getElementById('detailDlBtn');
+  if (item.in_playlist) {
+    dlBtn.classList.remove('hidden');
+    const dl = (item.downloads || []).find(x => !x.season && !x.episode) || (item.downloads || [])[0];
+    dlBtn.onclick = () => {
+      if (dl && dl.url) window.open(dl.url, '_blank', 'noopener');
+      else showToast('No hay descarga disponible ahora, pero si la pides la habrá');
+    };
+  } else {
+    dlBtn.classList.add('hidden');
+  }
   const seasonsTitle = document.getElementById('detailSeasonsTitle');
   const seasonsBox = document.getElementById('detailSeasons');
   if (item.type === 'tv' && item.episodes && item.episodes.length) {
@@ -99,6 +112,14 @@ export function openDetail(item, season) {
         location.href = `ver.html?id=${encodeURIComponent(item.id)}&type=${item.type}&season=${ep.season}&episode=${ep.episode}`;
       });
     });
+    seasonsBox.querySelectorAll('.ep-dl').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const dl = (item.downloads || []).find(x => x.season === parseInt(btn.dataset.season) && x.episode === parseInt(btn.dataset.episode));
+        if (dl && dl.url) window.open(dl.url, '_blank', 'noopener');
+        else showToast('No hay descarga disponible ahora, pero si la pides la habrá');
+      });
+    });
   } else {
     seasonsTitle.classList.add('hidden');
     seasonsBox.classList.add('hidden');
@@ -108,14 +129,6 @@ export function openDetail(item, season) {
   shareBtn.dataset.id = item.id;
   shareBtn.dataset.type = item.type;
   shareBtn.dataset.title = item.title;
-  const view = document.getElementById('detailView');
-  view.classList.remove('hidden', 'closing');
-  void view.offsetWidth;
-  view.classList.add('opening');
-  clearTimeout(view._ot);
-  view._ot = setTimeout(() => view.classList.remove('opening'), 1400);
-  document.body.style.overflow = 'hidden';
-  document.getElementById('detailView').scrollTop = 0;
 }
 
 function renderEps(eps, item) {
@@ -123,10 +136,14 @@ function renderEps(eps, item) {
   return eps.map(e => {
     const thumb = (e.still && String(e.still).startsWith('http')) ? safeImg(e.still) : (item.poster ? safeImg(item.poster) : '');
     const numLabel = `Cap ${e.episode}`;
+    const dlBtn = item.in_playlist
+      ? `<button class="ep-dl" data-season="${e.season}" data-episode="${e.episode}" aria-label="Descargar capítulo"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0 4-4m-4 4-4-4"/></svg></button>`
+      : '';
     return `
       <div class="ep-item" data-season="${e.season}" data-episode="${e.episode}">
         ${thumb ? `<img class="ep-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.style.display='none'" />` : `<span class="ep-num">${numLabel}</span>`}
         <span class="ep-name">${esc(e.name)}</span>
+        ${dlBtn}
         ${thumb ? `<span class="ep-num">${numLabel}</span>` : ''}
       </div>`;
   }).join('');
@@ -145,14 +162,6 @@ function updateDetailFavBtn() {
 }
 
 export function closeDetail() {
-  const view = document.getElementById('detailView');
-  if (view.classList.contains('hidden') || view.classList.contains('closing')) return;
-  view.classList.add('closing');
-  setTimeout(() => {
-    view.classList.add('hidden');
-    view.classList.remove('closing', 'opening');
-    document.body.style.overflow = 'auto';
-    currentDetail = null;
-  }, 160);
-  history.back();
+  if (history.length > 1) history.back();
+  else location.href = '/';
 }
