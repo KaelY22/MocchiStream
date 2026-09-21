@@ -26,6 +26,7 @@ export function pushItem(kind, item) {
     body.episode = item.episode || 0;
     body.posAt = item.posAt || 0;
     body.durAt = item.durAt || 0;
+    body.anime = item.anime ? 1 : 0;
   }
   syncFetch(`/sync/${kind}`, { method: 'POST', body: JSON.stringify(body) });
 }

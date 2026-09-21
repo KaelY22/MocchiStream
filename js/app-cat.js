@@ -1,6 +1,6 @@
-import { API_BASE, showToast, resetStorageIfStale } from './utils.js';
+import { API_BASE } from './utils.js';
 import { loadLists, cardHtml } from './catalog.js';
-import { applyTheme, setupTheme, setupMenu, setupSearch, setupInstall, registerSW } from './header.js';
+import { initPage } from './header.js';
 
 const TITLES = { peliculas: 'Películas', series: 'Series', anime: 'Anime', kdrama: 'K-Dramas' };
 
@@ -10,14 +10,8 @@ let loading = false;
 let done = false;
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (resetStorageIfStale()) showToast('Datos locales renovados');
-  applyTheme();
+  initPage();
   loadLists();
-  setupTheme();
-  setupMenu();
-  setupSearch();
-  setupInstall();
-  registerSW();
   const cat = new URLSearchParams(location.search).get('cat');
   if (!TITLES[cat]) {
     document.getElementById('catHead').textContent = 'Categoría no encontrada';

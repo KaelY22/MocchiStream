@@ -1,4 +1,4 @@
-const CACHE = 'mocchi-v53';
+const CACHE = 'mocchi-v57';
 const ASSETS = [
   '/',
   '/index.html',
@@ -18,6 +18,8 @@ const ASSETS = [
   '/css/fonts/inter-var.woff2',
   '/js/utils.js',
   '/js/catalog.js',
+  '/js/auth.js',
+  '/js/sync.js',
   '/js/header.js',
   '/js/home.js',
   '/js/library.js',
@@ -32,6 +34,7 @@ const ASSETS = [
   '/js/app-playlist.js',
   '/js/app-detail.js',
   '/js/app-ver.js',
+  '/js/app-404.js',
   '/js/admin.js',
   '/saver/mitm.html',
   '/saver/sw.js',

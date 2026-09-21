@@ -1,4 +1,4 @@
-import { showToast } from './utils.js';
+import { showToast, resetStorageIfStale } from './utils.js';
 import { setupAuth } from './auth.js';
 
 const THEME_KEY = 'ms_theme';
@@ -153,4 +153,14 @@ export function registerSW() {
       .catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
   }
+}
+
+export function initPage() {
+  if (resetStorageIfStale()) showToast('Datos locales renovados');
+  applyTheme();
+  setupTheme();
+  setupMenu();
+  setupSearch();
+  setupInstall();
+  registerSW();
 }

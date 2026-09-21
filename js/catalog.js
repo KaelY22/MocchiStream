@@ -7,7 +7,6 @@ let history = [];
 let watchLater = [];
 let detailFavUpdater = null;
 let listChangeListener = null;
-let currentDetailItem = null;
 
 const KEEP_RE = /pelispedia\./i;
 
@@ -193,6 +192,7 @@ export function removeFromWatchLater(e, btn) {
   const k = `${btn.dataset.type || 'movie'}|${btn.dataset.id}`;
   watchLater = watchLater.filter(w => itemKey(w) !== k);
   saveLS('ms_watchlater', watchLater);
+  removeItem('watch-later', { id: btn.dataset.id, type: btn.dataset.type || 'movie' });
   notifyListChanged();
   showToast('Eliminado de Ver después');
 }
@@ -217,9 +217,6 @@ export function cardHtml(item, opts = {}) {
     </div>
   `;
 }
-
-export function setCurrentDetailItem(item) { currentDetailItem = item; }
-export function getCurrentDetailItem() { return currentDetailItem; }
 
 window.toggleFavFromCard = toggleFavFromCard;
 window.removeFromHistory = removeFromHistory;

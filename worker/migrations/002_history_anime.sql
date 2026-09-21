@@ -1,0 +1,1 @@
+ALTER TABLE user_history ADD COLUMN anime INTEGER DEFAULT 0;

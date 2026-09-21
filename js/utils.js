@@ -47,15 +47,3 @@ export function normTitle(t) {
     .replace(/[:;,.!?()\-_]/g, ' ').replace(/\s*\((?:19|20)\d{2}\)\s*/g, ' ')
     .replace(/\b(?:19|20)\d{2}\b/g, ' ').replace(/\s+/g, ' ').trim();
 }
-
-export function decodeEntities(str) {
-  return String(str || '')
-    .replace(/&#0*38;|&amp;/g, '&')
-    .replace(/&#0*39;|&apos;|&#x27;/g, "'")
-    .replace(/&#0*34;|&quot;/g, '"')
-    .replace(/&#0*8217;/g, "'")
-    .replace(/&#0*8211;/g, '-')
-    .replace(/&#0*8212;/g, '-')
-    .replace(/&#0*8230;/g, '...')
-    .replace(/&#0*160;|&nbsp;/g, ' ');
-}

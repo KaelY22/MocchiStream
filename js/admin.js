@@ -18,15 +18,15 @@ document.addEventListener('DOMContentLoaded', () => {
     showAdminUI();
     return;
   }
-  const stored = localStorage.getItem('admin_password');
-  const timestamp = localStorage.getItem('admin_timestamp');
+  const stored = sessionStorage.getItem('admin_password');
+  const timestamp = sessionStorage.getItem('admin_timestamp');
   if (stored && timestamp && (Date.now() - parseInt(timestamp)) < 30 * 60 * 1000) {
     adminPassword = stored;
     showAdminUI();
   } else {
     document.getElementById('loginScreen').classList.remove('hidden');
-    localStorage.removeItem('admin_password');
-    localStorage.removeItem('admin_timestamp');
+    sessionStorage.removeItem('admin_password');
+    sessionStorage.removeItem('admin_timestamp');
   }
 });
 
@@ -41,8 +41,8 @@ function adminLoginCheck() {
     .then(res => {
       if (!res.ok) throw new Error('Invalid password');
       adminPassword = pwd;
-      localStorage.setItem('admin_password', pwd);
-      localStorage.setItem('admin_timestamp', Date.now().toString());
+      sessionStorage.setItem('admin_password', pwd);
+      sessionStorage.setItem('admin_timestamp', Date.now().toString());
       showAdminUI();
     })
     .catch(() => {
@@ -52,8 +52,8 @@ function adminLoginCheck() {
       card.classList.remove('auth-shake');
       void card.offsetWidth;
       card.classList.add('auth-shake');
-      localStorage.removeItem('admin_password');
-      localStorage.removeItem('admin_timestamp');
+      sessionStorage.removeItem('admin_password');
+      sessionStorage.removeItem('admin_timestamp');
     })
     .finally(() => {
       btn.classList.remove('loading');
@@ -130,8 +130,8 @@ async function purgeCache(scope) {
 }
 
 function logout() {
-  localStorage.removeItem('admin_password');
-  localStorage.removeItem('admin_timestamp');
+  sessionStorage.removeItem('admin_password');
+  sessionStorage.removeItem('admin_timestamp');
   window.location.reload();
 }
 

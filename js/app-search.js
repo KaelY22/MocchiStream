@@ -1,16 +1,10 @@
-import { API_BASE, showToast, resetStorageIfStale } from './utils.js';
+import { API_BASE } from './utils.js';
 import { loadLists, cardHtml } from './catalog.js';
-import { applyTheme, setupTheme, setupMenu, setupSearch, setupInstall, registerSW } from './header.js';
+import { initPage } from './header.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (resetStorageIfStale()) showToast('Datos locales renovados');
-  applyTheme();
+  initPage();
   loadLists();
-  setupTheme();
-  setupMenu();
-  setupSearch();
-  setupInstall();
-  registerSW();
   const q = new URLSearchParams(location.search).get('q') || '';
   if (q) doSearch(q);
   document.addEventListener('click', e => {

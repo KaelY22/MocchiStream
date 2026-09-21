@@ -2,7 +2,6 @@
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const CACHE_HOST = 'https://mocchi-cache.internal';
-const TMDB_KEY = 'e6333b32409e02a4a6eba6fb7ff866bb';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p';
 const NETFLIX_PROVIDER = '8';
@@ -30,7 +29,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
-    const key = env.TMDB_KEY || TMDB_KEY;
+    const key = env.TMDB_KEY;
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
@@ -61,7 +60,14 @@ export default {
       return handleDetails(id, type, env, corsHeaders, key);
     }
     if (path === '/api/play' && method === 'GET') {
-      return handlePlay(url, env, corsHeaders);
+      return handlePlay(url, env, corsHeaders, key);
+    }
+    if (path === '/api/tg-download' && method === 'GET') {
+      const tgUrl = url.searchParams.get('url');
+      if (!tgUrl || !/^https?:\/\/t\.me\//i.test(tgUrl)) return jsonResponse({ error: 'URL inválida' }, corsHeaders, 400);
+      const cdn = await resolveTelegram(tgUrl, env);
+      if (!cdn) return jsonResponse({ ok: false }, corsHeaders);
+      return jsonResponse({ ok: true, url: cdn }, corsHeaders);
     }
     if (path === '/api/stream' && method === 'GET') {
       const targetUrl = url.searchParams.get('url');
@@ -72,9 +78,6 @@ export default {
       const targetUrl = url.searchParams.get('url');
       if (!targetUrl) return jsonResponse({ error: 'Missing url' }, corsHeaders, 400);
       return handleProxy(targetUrl, url, request, corsHeaders);
-    }
-    if (path === '/api/avatar' && method === 'GET') {
-      return handleGetAvatar(env, corsHeaders);
     }
     if (path === '/api/playlists' && method === 'GET') {
       return handlePublicPlaylists(env, corsHeaders);
@@ -114,6 +117,9 @@ export default {
     if (path.startsWith('/api/admin')) {
       const password = request.headers.get('X-Admin-Password');
       let authorized = password === env.ADMIN_PASSWORD;
+      if (!authorized && path === '/api/admin/download-links' && method === 'PUT' && env.TG_BOT_SECRET) {
+        authorized = request.headers.get('X-Bot-Secret') === env.TG_BOT_SECRET;
+      }
       if (!authorized) {
         const sessionUser = await getSessionUser(request, env);
         authorized = !!(sessionUser && sessionUser.is_admin === 1);
@@ -136,9 +142,6 @@ export default {
         if (method === 'POST') return handleUpdateAvatar(request, env, corsHeaders);
         if (method === 'DELETE') return handleDeleteAvatar(env, corsHeaders);
       }
-      if (path === '/api/admin/playlists' && method === 'GET') {
-        return handlePublicPlaylists(env, corsHeaders);
-      }
       if (path === '/api/admin/playlists' && method === 'POST') {
         return handleCreatePlaylist(request, env, corsHeaders);
       }
@@ -160,11 +163,11 @@ export default {
       }
     }
 
-    return new Response('Not Found', { status: 404, headers: corsHeaders });
+    return jsonResponse({ error: 'Not Found' }, corsHeaders, 404);
   },
 
   async scheduled(event, env, ctx) {
-    const key = env.TMDB_KEY || TMDB_KEY;
+    const key = env.TMDB_KEY;
     const sectionSlugs = HOME_SECTIONS.slice(0, 3);
 
     for (const [slug, title] of sectionSlugs) {
@@ -174,23 +177,10 @@ export default {
       } catch (e) {}
     }
 
-    const sections = [];
-    const seen = new Set();
-    for (const [slug, title] of sectionSlugs) {
-      try {
-        const items = await homeSection(slug, 1, env, key);
-        sections.push({
-          slug, title,
-          items: items.filter(it => {
-            const k = it.type + '|' + it.id;
-            if (seen.has(k)) return false;
-            seen.add(k);
-            return true;
-          }).slice(0, 20)
-        });
-      } catch (e) {}
-    }
-    await cachePut('home/v10', { sections }, 86400, {}, env);
+    try {
+      await env.DB.prepare("DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at < datetime('now')").run();
+      await env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(Math.floor(Date.now() / 1000) - 86400).run();
+    } catch (e) {}
   }
 };
 
@@ -213,16 +203,17 @@ const STREAM_ALLOWED_HOSTS = [
   'filelions.to', 'embed69.org', 'xupalace.org', 'hglink.to', 'premilkyway.com',
   'savefiles.com', 'mwish.pro', 'dwish.pro', 'embedwish.com', 'wishembed.pro',
   'kswplayer.info', 'wishfast.top', 'streamwish.site', 'sfastwish.com', 'strwish.xyz',
-  'voe.sx', 'videoapp.zip', 'vidhidepro.com', 'vidhide.*', 'morencius.com', 'minochinos.com',
+  'obeywish.com', 'asnwish.com', 'voe.sx', 'videoapp.zip', 'vidhidepro.com', 'vidhide.*', 'morencius.com', 'minochinos.com',
   'acek-cdn.com', 'dramiyos-cdn.com', 'cloudatacdn.com', 'pelispedia.is', 'pelispedia.mov',
-  'cinecalidad.am', 'cinecalidad.ec', 'cinecalidad.run', 'seriesmetro.net', 'monoschinos.st',
+  'seriesmetro.net', 'monoschinos.st',
   'latanime.org', 'ok.ru', 'mp4upload.com', 'filemoon.sx', 'filemoon.top', 'filemoon.xyz',
-  'filemoon.fun', 'mixdrop.*', 'miixdrop.top', 'hqq.tv', 'hqq.to', 'yourupload.com',
-  'pdrain.*', 'pelisplushd.bz',
+  'filemoon.fun', 'mixdrop.*', 'miixdrop.top', 'mxdrop.to', 'mxdrop.top', 'mdy48tn97.com',
+  'luluvid.com', 'luluvdo.com', 'dsvplay.com', 'n1mwq.org', 'hqq.tv', 'hqq.to', 'yourupload.com',
+  'vidcache.net', 'pdrain.*', 'pelisplushd.bz', 't.me', 'telesco.pe', 'telegram.org',
 ];
 
 const SITE_ALLOWED_HOSTS = [
-  'cinecalidad.am', 'cinecalidad.ec', 'cinecalidad.run', 'pelispedia.is', 'pelispedia.mov',
+  'pelispedia.is', 'pelispedia.mov',
   'pelispedia.ink', 'seriesmetro.net', 'monoschinos.st', 'latanime.org', 'pelisplushd.bz',
 ];
 
@@ -346,6 +337,17 @@ async function cachePut(key, data, ttl, corsHeaders, env) {
   return res;
 }
 
+async function cacheDelete(key, env) {
+  let deleted = false;
+  try {
+    deleted = await caches.default.delete(new Request(CACHE_HOST + '/' + key));
+  } catch (e) {}
+  if (env && env.DB) {
+    await env.DB.prepare('DELETE FROM cache_keys WHERE key = ?').bind(key).run().catch(() => {});
+  }
+  return deleted;
+}
+
 function normTitle(t) {
   return String(t || '')
     .toLowerCase()
@@ -436,7 +438,10 @@ async function homeSection(slug, page, env, key) {
     case 'top10global':
       return fetchTop10(env, key);
     case 'popular':
-      return discover('movie', page, {}, env, key).then(m => discover('tv', page, {}, env, key).then(t => m.concat(t)));
+      return Promise.all([
+        discover('movie', page, {}, env, key),
+        discover('tv', page, {}, env, key),
+      ]).then(([m, t]) => m.concat(t));
     case 'top':
       return Promise.all([
         discover('movie', page, { sort_by: 'vote_average.desc', vote_count: '200' }, env, key),
@@ -483,32 +488,7 @@ async function handleMainPage(url, env, corsHeaders, key) {
       return jsonResponse([], corsHeaders);
     }
   }
-
-  const cacheKey = 'home/v10';
-  const hit = await cacheGet(cacheKey);
-  if (hit) return hit;
-
-  const sections = [];
-  const seen = new Set();
-  const results = await Promise.allSettled(
-    HOME_SECTIONS.slice(0, 3).map(async ([slug, title]) => {
-        try {
-          const items = await homeSection(slug, 1, env, key);
-          return { slug, title, items: items.filter(it => {
-            const k = it.type + '|' + it.id;
-            if (seen.has(k)) return false;
-            seen.add(k);
-            return true;
-          }) };
-        } catch (e) {
-          return { slug, title, items: [] };
-        }
-      })
-  );
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value.items.length) sections.push(r.value);
-  }
-  return cachePut(cacheKey, { sections }, 86400, corsHeaders, env);
+  return jsonResponse({ error: 'Missing section' }, corsHeaders, 400);
 }
 
 async function handleSearch(query, env, corsHeaders, key) {
@@ -591,19 +571,19 @@ async function handleDetails(id, type, env, corsHeaders, key) {
 // ==================== REPRODUCCIÓN ON-DEMAND ====================
 const FAST_PRIORITY = [
   /vimeos\.(?:net|zip)/i,
-  /doodstream\.com|dooood\.com|doods\.pro|dood\.la|d0000d\.com|d000d\.com/i,
   /byse\w*\.(?:com|sx)/i,
   /streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash/i,
-  /streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to|embedwish\.com|wishembed\.pro|hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|kswplayer\.info|wishfast\.top/i,
+  /streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to|embedwish\.com|wishembed\.pro|hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|kswplayer\.info|wishfast\.top|obeywish\.com|asnwish\.com|hlswish\.com/i,
   /filemoon\.(?:sx|top|xyz|fun)/i,
   /vidhide\w*\.\w+|morencius\.com/i,
-  /mixdrop\w*\.\w+|miixdrop\.top/i,
-  /voe\.sx/i,
+  /mixdrop\w*\.\w+|miixdrop\.top|mxdrop\.(?:to|top)|mdy48tn97\.com/i,
+  /luluvid\.com|luluvdo\.com|dsvplay\.com/i,
   /hqq\.(?:tv|to)/i,
   /mp4upload\.com/i,
   /yourupload\.com/i,
   /goodstream\.one/i,
-  /hlswish\.com/i,
+  /doodstream\.com|dooood\.com|doods\.pro|dood\.la|d0000d\.com|d000d\.com|playmogo\.com/i,
+  /voe\.sx/i,
   /uqload\.[a-z]+/i,
   /fastream\.to/i,
 ];
@@ -623,44 +603,6 @@ function sortEmbeds(embeds) {
     if (rb === -1) return -1;
     return ra - rb;
   });
-}
-
-function extractCinecalidadItems(html) {
-  const items = [];
-  const re = /<article[^>]*class="[^"]*item movies[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    const block = m[1];
-    const href = block.match(/<a[^>]*href="([^"]*\/ver-(?:pelicula|serie)\/[^"]*)"/i);
-    if (!href) continue;
-    const title = block.match(/class="in_title"[^>]*>\s*([^<]+)</i);
-    if (!title) continue;
-    const year = block.match(/<p>(\d{4})<\/p>/);
-    const type = /\/ver-serie\//.test(href[1]) ? 'tv' : 'movie';
-    items.push({
-      title: decodeEntities(title[1]).trim(),
-      url: href[1],
-      type,
-      year: year ? parseInt(year[1]) : null,
-    });
-  }
-  return items;
-}
-
-function cinecalidadEmbeds(html) {
-  return [...html.matchAll(/data-option="([^"]+)"/gi)]
-    .map(m => decodeEntities(m[1]))
-    .filter(u => /^https?:/.test(u));
-}
-
-function cinecalidadEpisodeLinks(html) {
-  const links = [];
-  const re = /href="([^"]*\/ver-el-episodio\/([^"]*?)-(\d+)x(\d+)\/?)"/gi;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    links.push({ url: m[1], season: parseInt(m[3]), episode: parseInt(m[4]) });
-  }
-  return links;
 }
 
 function extractPelispediaItems(html) {
@@ -720,7 +662,7 @@ function extractMonoschinosItems(html) {
   return items;
 }
 
-function monoschinosEmbeds(html) {
+function dataPlayerEmbeds(html) {
   return [...html.matchAll(/data-player="([^"]+)"/gi)]
     .map(m => {
       try {
@@ -755,17 +697,6 @@ function extractLatanimeItems(html) {
     items.push({ title, url: m[1], type: 'tv', year: null });
   }
   return items;
-}
-
-function latanimeEmbeds(html) {
-  return [...html.matchAll(/data-player="([^"]+)"/gi)]
-    .map(m => {
-      try {
-        const fixed = m[1].replace(/-/g, '+').replace(/_/g, '/');
-        return atob(fixed + '='.repeat((4 - fixed.length % 4) % 4));
-      } catch (e) { return ''; }
-    })
-    .filter(u => /^https?:/.test(u));
 }
 
 function latanimeEpisodeLinks(html) {
@@ -815,17 +746,15 @@ function pelisplushdEpisodeLinks(html) {
   return links;
 }
 
+function buildAnimeEpisodeUrl(base, season, episode) {
+  const m = String(base).match(/^(https?:\/\/[^/]+)\/anime\/([^/?#]+)/);
+  if (!m) return null;
+  const slug = m[2].replace(/-sub-espanol$/, '');
+  return `${m[1]}/ver/${slug}-episodio-${episode}`;
+}
+
 const SITES = {
   movies: [
-    {
-      name: 'Cinecalidad',
-      domains: ['www.cinecalidad.ec', 'cinecalidad.am', 'cinecalidad.run'],
-      searchPath: q => `/?s=${encodeURIComponent(q)}`,
-      parse: extractCinecalidadItems,
-      embeds: cinecalidadEmbeds,
-      episodeLinks: cinecalidadEpisodeLinks,
-      hasEpisodes: false,
-    },
     {
       name: 'Pelispedia',
       domains: ['pelispedia.is', 'pelispedia.mov', 'pelispedia.ink'],
@@ -853,20 +782,24 @@ const SITES = {
       domains: ['monoschinos.st'],
       searchPath: q => `/buscar?q=${encodeURIComponent(q)}`,
       parse: extractMonoschinosItems,
-      embeds: monoschinosEmbeds,
+      embeds: dataPlayerEmbeds,
       episodeLinks: monoschinosEpisodeLinks,
       episodeUrl: (base) => base,
+      buildEpisodeUrl: buildAnimeEpisodeUrl,
       hasEpisodes: true,
+      flatSeasons: true,
     },
     {
       name: 'LaTAnime',
       domains: ['latanime.org'],
       searchPath: q => `/buscar?q=${encodeURIComponent(q)}`,
       parse: extractLatanimeItems,
-      embeds: latanimeEmbeds,
+      embeds: dataPlayerEmbeds,
       episodeLinks: latanimeEpisodeLinks,
       episodeUrl: (base) => base,
+      buildEpisodeUrl: buildAnimeEpisodeUrl,
       hasEpisodes: true,
+      flatSeasons: true,
     },
   ],
 };
@@ -918,46 +851,67 @@ async function siteFetchHTML(site, path, timeout) {
   throw lastErr || new Error('Sitio caído');
 }
 
-async function trySite(site, query, queryBase, season, episode, deadline, type) {
-  let items = [];
-  try {
-    const { html, base } = await siteFetchHTML(site, site.searchPath(query), 4000);
-    items = site.parse(html).map(it => ({ ...it, url: /^https?:/.test(it.url) ? it.url : base + it.url }));
-  } catch (e) {
-    return [];
-  }
-  if (!items.length && queryBase && queryBase !== query && Date.now() < deadline) {
-    try {
-      const { html, base } = await siteFetchHTML(site, site.searchPath(queryBase), 4000);
-      items = site.parse(html).map(it => ({ ...it, url: /^https?:/.test(it.url) ? it.url : base + it.url }));
-    } catch (e) {}
-  }
-  if (!items.length) return [];
-  const q = normTitle(queryBase || query);
-  const sameType = items.filter(it => it.type === type);
-  const bestOf = list => list.sort((a, b) => normTitle(b.title).length - normTitle(a.title).length)[0];
-  const match = sameType.find(it => normTitle(it.title) === q)
-    || bestOf(sameType.filter(it => normTitle(it.title).includes(q) || q.includes(normTitle(it.title))));
-  if (!match || Date.now() > deadline) return [];
-
-  let embeds = [];
-  try {
-    let target = pickEpisodeUrl(site, match, season, episode);
-    if (!assertSafeUrl(target, SITE_ALLOWED_HOSTS)) return [];
-    let html = await fetchHTML(target, 4000, SITE_ALLOWED_HOSTS);
-    if (season && episode && site.episodeLinks) {
-      const ep = site.episodeLinks(html).find(l => l.season === season && l.episode === episode);
-      if (ep) {
-        if (!assertSafeUrl(ep.url, SITE_ALLOWED_HOSTS)) return [];
-        html = await fetchHTML(ep.url, 4000, SITE_ALLOWED_HOSTS);
-      }
-    }
-    embeds = site.embeds(html);
-  } catch (e) {}
-  return embeds;
+async function matchPool(sameType, q, season) {
+  const seasonPool = season > 1
+    ? sameType.filter(it => new RegExp(`temporada[-\\s]*${season}|[-\\s]${season}(?:[-\\s]|$)`, 'i').test(normTitle(it.title)))
+    : [];
+  const base = seasonPool.length ? seasonPool : sameType;
+  const pool = base.filter(it => normTitle(it.title).includes(q) || q.includes(normTitle(it.title)))
+    .sort((a, b) => Math.abs(normTitle(a.title).length - q.length) - Math.abs(normTitle(b.title).length - q.length));
+  const exact = base.find(it => normTitle(it.title) === q);
+  return exact ? [exact] : pool.slice(0, 2);
 }
 
-async function handlePlay(url, env, corsHeaders) {
+async function collectEmbeds(site, matches, season, episode) {
+  return (await Promise.allSettled(matches.map(async match => {
+    try {
+      const target = pickEpisodeUrl(site, match, season, episode);
+      if (!assertSafeUrl(target, SITE_ALLOWED_HOSTS)) return [];
+      let html = await fetchHTML(target, 4000, SITE_ALLOWED_HOSTS);
+      if (season && episode && site.episodeLinks) {
+        const eps = site.episodeLinks(html);
+        const ep = site.flatSeasons
+          ? eps.find(l => l.episode === episode)
+          : eps.find(l => l.season === season && l.episode === episode);
+        if (ep) {
+          if (!assertSafeUrl(ep.url, SITE_ALLOWED_HOSTS)) return [];
+          html = await fetchHTML(ep.url, 4000, SITE_ALLOWED_HOSTS);
+        } else if (site.buildEpisodeUrl) {
+          const built = site.buildEpisodeUrl(target, season, episode);
+          if (built && assertSafeUrl(built, SITE_ALLOWED_HOSTS)) {
+            try {
+              html = await fetchHTML(built, 4000, SITE_ALLOWED_HOSTS);
+            } catch (e) {
+              return [];
+            }
+          }
+        }
+      }
+      return site.embeds(html);
+    } catch (e) {
+      return [];
+    }
+  }))).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+}
+
+async function trySite(site, queries, season, episode, deadline, type) {
+  for (const q of queries) {
+    if (Date.now() > deadline) break;
+    let parsed = [];
+    try {
+      const { html, base } = await siteFetchHTML(site, site.searchPath(q), 3000);
+      parsed = site.parse(html).map(it => ({ ...it, url: /^https?:/.test(it.url) ? it.url : base + it.url }));
+    } catch (e) {}
+    if (!parsed.length) continue;
+    const matches = await matchPool(parsed.filter(it => it.type === type), normTitle(q), season);
+    if (!matches.length) continue;
+    const embeds = await collectEmbeds(site, matches, season, episode);
+    if (embeds.length) return embeds;
+  }
+  return [];
+}
+
+async function handlePlay(url, env, corsHeaders, key) {
   const title = (url.searchParams.get('title') || '').trim();
   const year = url.searchParams.get('year');
   const type = url.searchParams.get('type') === 'tv' ? 'tv' : 'movie';
@@ -966,6 +920,12 @@ async function handlePlay(url, env, corsHeaders) {
   const anime = url.searchParams.get('anime') === '1';
   if (!title) return jsonResponse({ error: 'Missing title' }, corsHeaders, 400);
 
+  const itemId = url.searchParams.get('id');
+  if (itemId && /^\d+$/.test(itemId)) {
+    const tg = await findTelegramDownload(env, itemId, type, season, episode);
+    if (tg) return jsonResponse({ ok: true, type: 'mp4', url: tg, direct: true }, corsHeaders);
+  }
+
   const cacheKey = 'play/v1/' + (anime ? 'anime' : type) + '/' + encodeURIComponent(normTitle(title)) + '/' + (year || 0) + '/' + (season || 0) + '/' + (episode || 0);
   const hit = await cacheGet(cacheKey);
   if (hit) {
@@ -973,22 +933,37 @@ async function handlePlay(url, env, corsHeaders) {
     if (cached && cached.ok && cached.url) {
       return jsonResponse(cached, corsHeaders);
     }
+    if (cached && cached.ok === false && !cached.iframe) {
+      return jsonResponse(cached, corsHeaders);
+    }
   }
 
   const sites = anime ? SITES.anime : SITES.movies;
   const deadline = Date.now() + (season ? 22000 : 18000);
-  const query = year ? `${title} ${year}` : title;
-  const queryBase = title;
-
-  const siteFns = sites.map(site => trySite(site, query, queryBase, season, episode, deadline, anime ? 'tv' : type));
-  const firstEmbeds = await siteFns[0];
-  let embeds;
-  if (firstEmbeds.some(u => fastRank(u) !== -1)) {
-    embeds = firstEmbeds;
-  } else {
-    const rest = await Promise.allSettled(siteFns.slice(1));
-    embeds = [firstEmbeds, ...rest.map(r => r.status === 'fulfilled' ? r.value : [])].flat();
+  const queries = [year ? `${title} ${year}` : title, title];
+  if (anime && itemId && /^\d+$/.test(itemId)) {
+    try {
+      const alts = await tmdbGet('/tv/' + itemId + '/alternative_titles', {}, env, key, 604800);
+      const seen = new Set(queries.map(normTitle));
+      const PRIO = ['JP', 'MX', 'ES', 'US', 'AR', 'CO', 'CL', 'PE'];
+      const extra = [];
+      for (const a of (alts && alts.results) || []) {
+        const t = String(a.title || '').trim();
+        if (!t || t.length > 70 || t.length < 6 || !/[A-Za-z]/.test(t)) continue;
+        const n = normTitle(t);
+        if (!n || seen.has(n)) continue;
+        seen.add(n);
+        const p = PRIO.indexOf(a.iso_3166_1);
+        extra.push({ t, p: p < 0 ? 99 : p, len: t.length });
+      }
+      extra.sort((x, y) => (x.p - y.p) || (x.len - y.len));
+      for (const e of extra.slice(0, 3)) queries.push(e.t);
+    } catch (e) {}
   }
+
+  const siteFns = sites.map(site => trySite(site, queries, season, episode, deadline, anime ? 'tv' : type));
+  const settled = await Promise.allSettled(siteFns);
+  const embeds = settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
   const sorted = sortEmbeds(embeds);
   const firstIframe = sorted.find(u => fastRank(u) === -1) || null;
   const fasts = sorted.filter(u => fastRank(u) !== -1).slice(0, 4);
@@ -1002,7 +977,49 @@ async function handlePlay(url, env, corsHeaders) {
     return jsonResponse({ ok: true, ...winner }, corsHeaders);
   }
   if (firstIframe) return jsonResponse({ ok: false, iframe: firstIframe }, corsHeaders);
+  await cachePut(cacheKey, { ok: false }, 120, corsHeaders, env);
   return jsonResponse({ ok: false }, corsHeaders);
+}
+
+// ==================== TELEGRAM (Mocchi Uploader) ====================
+async function findTelegramDownload(env, itemId, type, season, episode) {
+  try {
+    const { results } = await env.DB.prepare(
+      'SELECT url FROM download_links WHERE item_id = ? AND type = ? AND ((season = ? AND episode = ?) OR (season = 0 AND episode = 0)) ORDER BY (season = 0) ASC'
+    ).bind(String(itemId), type, season || 0, episode || 0).all();
+    for (const row of (results || [])) {
+      if (/^https?:\/\/t\.me\//i.test(row.url)) {
+        const cdn = await resolveTelegram(row.url, env);
+        if (cdn) return cdn;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+async function resolveTelegram(tgUrl, env) {
+  const cacheKey = 'tg/v1/' + encodeURIComponent(tgUrl);
+  const hit = await cacheGet(cacheKey);
+  if (hit) {
+    try {
+      const cached = await hit.json();
+      if (cached && cached.url) return cached.url;
+    } catch (e) {}
+  }
+  const embed = tgUrl.replace(/\/+$/, '') + '?embed=1';
+  try {
+    const res = await fetchSafe(embed, { allowed: ['t.me'], timeout: 10000, headers: { 'User-Agent': USER_AGENT } });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(/<video[^>]+src="([^"]+)"/i);
+    if (!m) return null;
+    const url = m[1].replace(/&amp;/g, '&');
+    if (!/^https:\/\/[a-z0-9.-]*telesco\.pe\//i.test(url)) return null;
+    await cachePut(cacheKey, { url }, 7200, {}, env);
+    return url;
+  } catch (e) {
+    return null;
+  }
 }
 
 // ==================== REPRODUCTOR PROPIO ====================
@@ -1010,10 +1027,10 @@ const STREAM_HOSTS = [
   { re: /(?:doodstream\.com|dooood\.com|doods\.pro|dood\.(?:la|to|so|ws|yt|li|wf|cx|sh|pm|watch|video)|d0000d\.com|d000d\.com|ds2play\.com|ds2video\.com|myvidplay\.com|playmogo\.com)/i, fn: extractDoodstream },
   { re: /byse\w*\.(?:com|sx)/i, fn: extractByse },
   { re: /(?:streamtape\.(?:com|net|xyz)|watchadsontape\.com|shavetape\.cash)/i, fn: extractStreamTape },
-  { re: /(?:hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|embedwish\.com|wishembed\.pro|kswplayer\.info|wishfast\.top|streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to)/i, fn: extractStreamWish },
+  { re: /(?:hglink\.to|savefiles\.com|mwish\.pro|dwish\.pro|embedwish\.com|wishembed\.pro|kswplayer\.info|wishfast\.top|streamwish\.site|sfastwish\.com|strwish\w*\.\w+|streamwish\.to|obeywish\.com|asnwish\.com|hlswish\.com)/i, fn: extractStreamWish },
   { re: /filemoon\.(?:sx|top|xyz|fun)/i, fn: extractFilemoon },
   { re: /vidhide\w*\.\w+|morencius\.com/i, fn: extractVidhide },
-  { re: /mixdrop\w*\.\w+|miixdrop\.top/i, fn: extractMixdrop },
+  { re: /mixdrop\w*\.\w+|miixdrop\.top|mxdrop\.(?:to|top)|mdy48tn97\.com/i, fn: extractMixdrop },
   { re: /voe\.sx/i, fn: extractVoe },
   { re: /hqq\.(?:tv|to)/i, fn: extractHqq },
   { re: /mp4upload\.com/i, fn: extractMp4upload },
@@ -1340,7 +1357,7 @@ function unescapeJsLiteral(str) {
 }
 
 function unpackPacker(input) {
-  const idx = input.indexOf('eval(function(p,a,c,k,e,d)');
+  const idx = input.indexOf('function(p,a,c,k,e,d');
   if (idx === -1) return input;
   const argsStart = input.indexOf("return p}('", idx);
   if (argsStart === -1) return input;
@@ -1357,7 +1374,7 @@ function unpackPacker(input) {
     payload += ch;
     j++;
   }
-  const argsMatch = input.slice(j + 1).match(/^\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']*)'\.split\('\|'\)\)/);
+  const argsMatch = input.slice(j + 1).match(/^\s*"?\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([^']*)'\.split\(['"]\|['"]\)/);
   if (!argsMatch) return input;
   const a = parseInt(argsMatch[1]);
   const c = parseInt(argsMatch[2]);
@@ -1426,7 +1443,18 @@ async function extractOnce(targetUrl, deadline) {
 }
 
 async function verifyStream(result) {
-  if (!result || result.type !== 'hls') return true;
+  if (!result) return false;
+  if (result.type === 'mp4') {
+    const headers = { 'User-Agent': USER_AGENT, 'Accept': '*/*', 'Range': 'bytes=0-0' };
+    if (result.referer) headers['Referer'] = result.referer;
+    try {
+      const res = await fetchSafe(result.url, { allowed: STREAM_ALLOWED_HOSTS, timeout: 5000, headers });
+      return res.ok;
+    } catch (e) {
+      return false;
+    }
+  }
+  if (result.type !== 'hls') return true;
   const headers = { 'User-Agent': USER_AGENT, 'Accept': '*/*' };
   if (result.referer) headers['Referer'] = result.referer;
   let text;
@@ -1489,10 +1517,7 @@ async function handleStreamResolve(targetUrl, corsHeaders, env) {
       if (cached && cached.ok && (cached.type !== 'hls' || await verifyStream(cached))) {
         return jsonResponse(cached, corsHeaders);
       }
-      await caches.default.delete(new Request(CACHE_HOST + '/' + cacheKey));
-      if (env && env.DB) {
-        await env.DB.prepare('DELETE FROM cache_keys WHERE key = ?').bind(cacheKey).run().catch(() => {});
-      }
+      await cacheDelete(cacheKey, env);
     }
     const hostResult = await tryHostExtractors(targetUrl);
     if (hostResult) {
@@ -1624,7 +1649,10 @@ async function handleUpdateAvatar(request, env, corsHeaders) {
     return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400);
   }
   try {
-    const { avatar } = body;
+    const avatar = String(body.avatar || '').trim();
+    if (avatar && (!/^https:\/\//i.test(avatar) || avatar.length > 500)) {
+      return jsonResponse({ error: 'Avatar inválido' }, corsHeaders, 400);
+    }
     await env.DB.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').bind('avatar', avatar).run();
     return jsonResponse({ success: true }, corsHeaders);
   } catch (e) {
@@ -1779,7 +1807,7 @@ async function handleUpsertDownloadLink(request, env, corsHeaders) {
         'INSERT INTO download_links (item_id, type, season, episode, url) VALUES (?, ?, ?, ?, ?) ON CONFLICT(item_id, type, season, episode) DO UPDATE SET url = excluded.url'
       ).bind(itemId, type, season, episode, url).run();
     }
-    await caches.default.delete(new Request(CACHE_HOST + '/details/v2/' + type + '/' + encodeURIComponent(itemId)));
+    await cacheDelete('details/v2/' + type + '/' + encodeURIComponent(itemId), env);
     return jsonResponse({ success: true }, corsHeaders);
   } catch (e) {
     return jsonResponse({ error: 'Error interno' }, corsHeaders, 500);
@@ -1815,20 +1843,18 @@ async function handleCachePurge(request, env, corsHeaders) {
   try {
     const { results } = await env.DB.prepare('SELECT key FROM cache_keys' + where).all();
     let deleted = 0;
+    let missing = 0;
     let failed = 0;
     for (const row of results) {
-      if (deleted + failed >= 500) break;
+      if (deleted + missing + failed >= 500) break;
       try {
         if (await caches.default.delete(new Request(CACHE_HOST + '/' + row.key))) deleted++;
+        else missing++;
       } catch (e) { failed++; }
     }
     await env.DB.prepare('DELETE FROM cache_keys' + where).run();
-    const staleKeys = await env.DB.prepare("SELECT key FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").all();
-    for (const row of (staleKeys.results || [])) {
-      try { await caches.default.delete(new Request(CACHE_HOST + '/' + row.key)); } catch (e) {}
-    }
     const stale = await env.DB.prepare("DELETE FROM cache_keys WHERE updated_at < datetime('now', '-1 day')").run();
-    return jsonResponse({ success: true, deleted, failed, stale: stale.meta.changes || 0 }, corsHeaders);
+    return jsonResponse({ success: true, deleted, missing, failed, stale: stale.meta.changes || 0 }, corsHeaders);
   } catch (e) {
     return jsonResponse({ error: 'Purge failed: ' + String(e && e.message || e) }, corsHeaders, 500);
   }
@@ -1858,7 +1884,7 @@ async function hashPassword(password, salt) {
 
 async function createSession(userId, env) {
   const token = crypto.randomUUID();
-  await env.DB.prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').bind(token, userId).run();
+  await env.DB.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))").bind(token, userId).run();
   return token;
 }
 
@@ -1867,12 +1893,34 @@ async function getSessionUser(request, env) {
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
   const row = await env.DB.prepare(
-    'SELECT s.user_id, u.username, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'
+    "SELECT s.user_id, u.username, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND (s.expires_at IS NULL OR s.expires_at > datetime('now'))"
   ).bind(token).first();
   return row || null;
 }
 
+async function rateLimit(env, request, bucket, limit, windowSec) {
+  try {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const now = Math.floor(Date.now() / 1000);
+    const windowStart = now - (now % windowSec);
+    const key = bucket + ':' + ip;
+    const row = await env.DB.prepare('SELECT attempts FROM rate_limits WHERE key = ? AND window_start = ?').bind(key, windowStart).first();
+    const attempts = (row ? row.attempts : 0) + 1;
+    if (row) {
+      await env.DB.prepare('UPDATE rate_limits SET attempts = ? WHERE key = ? AND window_start = ?').bind(attempts, key, windowStart).run();
+    } else {
+      await env.DB.prepare('INSERT INTO rate_limits (key, window_start, attempts) VALUES (?, ?, 1)').bind(key, windowStart).run();
+    }
+    return attempts <= limit;
+  } catch (e) {
+    return true;
+  }
+}
+
 async function handleRegister(request, env, corsHeaders) {
+  if (!await rateLimit(env, request, 'register', 5, 3600)) {
+    return jsonResponse({ error: 'Demasiados registros. Intenta más tarde.' }, corsHeaders, 429);
+  }
   let body;
   try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
   const username = String(body.username || '').trim();
@@ -1890,6 +1938,9 @@ async function handleRegister(request, env, corsHeaders) {
 }
 
 async function handleLogin(request, env, corsHeaders) {
+  if (!await rateLimit(env, request, 'login', 10, 900)) {
+    return jsonResponse({ error: 'Demasiados intentos. Espera unos minutos.' }, corsHeaders, 429);
+  }
   let body;
   try { body = await request.json(); } catch (e) { return jsonResponse({ error: 'Invalid body' }, corsHeaders, 400); }
   const username = String(body.username || '').trim();
@@ -1921,7 +1972,7 @@ async function handleSyncAll(request, env, corsHeaders) {
   if (!user) return jsonResponse({ error: 'No autorizado' }, corsHeaders, 401);
   const [favs, hist, wl] = await Promise.all([
     env.DB.prepare('SELECT item_id id, type, title, poster FROM user_favorites WHERE user_id = ? ORDER BY created_at DESC').bind(user.user_id).all(),
-    env.DB.prepare('SELECT item_id id, type, title, poster, season, episode, position AS posAt, duration AS durAt, updated_at AS ts FROM user_history WHERE user_id = ? ORDER BY updated_at DESC').bind(user.user_id).all(),
+    env.DB.prepare('SELECT item_id id, type, title, poster, season, episode, position AS posAt, duration AS durAt, anime, updated_at AS ts FROM user_history WHERE user_id = ? ORDER BY updated_at DESC').bind(user.user_id).all(),
     env.DB.prepare('SELECT item_id id, type, title, poster FROM user_watch_later WHERE user_id = ? ORDER BY created_at DESC').bind(user.user_id).all(),
   ]);
   return jsonResponse({ favorites: favs.results, history: hist.results, watch_later: wl.results }, corsHeaders);
@@ -1946,7 +1997,8 @@ async function handleSyncAdd(request, env, corsHeaders, kind) {
     const episode = parseInt(body.episode, 10) || 0;
     const position = parseInt(body.posAt ?? body.position, 10) || 0;
     const duration = parseInt(body.durAt ?? body.duration, 10) || 0;
-    await env.DB.prepare('INSERT OR REPLACE INTO user_history (user_id, item_id, type, title, poster, season, episode, position, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(user.user_id, itemId, type, title, poster, season, episode, position, duration).run();
+    const anime = body.anime ? 1 : 0;
+    await env.DB.prepare('INSERT OR REPLACE INTO user_history (user_id, item_id, type, title, poster, season, episode, position, duration, anime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(user.user_id, itemId, type, title, poster, season, episode, position, duration, anime).run();
   }
   return jsonResponse({ success: true }, corsHeaders);
 }

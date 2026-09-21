@@ -2,7 +2,7 @@
 
 Reproductor y catálogo de streaming personal, **sin anuncios**, con portada curada, búsqueda universal y panel de administración privado.
 
-MocchiStream agrega contenido de **Pelispedia** (proveedor único), lo organiza en una sola interfaz y reproduce los episodios en un **reproductor propio** (HLS directo) sin los anuncios de las fuentes originales. Cuando una fuente no se puede resolver, cae a un iframe limpio.
+MocchiStream agrega contenido de varias fuentes (Pelispedia, PelisPlusHD, Monoschinos, LaTAnime) con catálogo TMDB, y prioriza los videos subidos a **Telegram** para reproducir sin anuncios en su **reproductor propio** (HLS/mp4 directo). Cuando una fuente no se puede resolver, cae a un iframe limpio.
 
 - **Producción**: https://mocchi-stream.pages.dev
 - **API**: `mocchistream.kael-iv22.workers.dev`
@@ -95,14 +95,16 @@ La configuración del worker (binding D1, secretos) vive en `wrangler.toml`. La 
 
 | Endpoint | Qué hace |
 |---|---|
-| `/api/search?q=` | Búsqueda en Pelispedia |
-| `/api/mainpage?section=&page=` | Portada y secciones |
-| `/api/details?url=` | Detalle + episodios + enlaces de descarga |
-| `/api/links?url=` | Servidores del embed disponibles |
+| `/api/search?q=` | Búsqueda en TMDB |
+| `/api/sections` · `/api/mainpage?section=&page=` | Portada y secciones |
+| `/api/details` | Detalle + episodios + enlaces de descarga |
+| `/api/play?title=&type=&year=&season=&episode=&anime=&id=` | Fuente: Telegram primero, luego scrapers |
+| `/api/tg-download?item_id=` | Resuelve el link de Telegram a CDN directo |
 | `/api/stream?url=` | Resuelve embed → m3u8/mp4 para el reproductor propio |
 | `/api/proxy?url=&ref=` | Passthrough del stream con retries y CORS |
-| `/api/metadata` y `/api/categories` | Categorías personalizadas |
-| `/api/avatar` | Avatar del perfil |
+| `/api/playlists` · `/api/playlists/{id}` | Playlists públicas |
+| `/api/auth/*` | Registro, login, logout y sesión |
+| `/api/sync/*` | Sincronización de favoritos, historial y Ver después |
 | `/api/admin/*` | Gestión privada (protegido con `X-Admin-Password`) |
 
 ---

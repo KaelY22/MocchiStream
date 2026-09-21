@@ -7,7 +7,7 @@
 
 ## Qué es
 
-Web app de streaming con **proveedor único: Pelispedia**. Busca, ve portada por secciones, abre detalles y reproduce en **reproductor propio sin anuncios** (el worker extrae el m3u8 directo) con fallback a iframe cuando la fuente no se puede resolver. Incluye admin privado para categorías personalizadas y enlaces de descarga por capítulo.
+Web app de streaming (catálogo TMDB) que reproduce en **reproductor propio sin anuncios**. Prioridad de fuentes: **Telegram** (links subidos por el bot al canal) y, si no hay, scrapers (Pelispedia, PelisPlusHD, Monoschinos, LaTAnime). Fallback a iframe cuando la fuente no se puede resolver. Incluye admin privado, playlists, cuentas con sesiones y sincronización de listas.
 
 **URL**: `https://mocchi-stream.pages.dev`
 **Worker**: `mocchistream` (`mocchistream.kael-iv22.workers.dev`)
@@ -83,8 +83,8 @@ MocchiStream/
 
 ### Reproductor propio (V4.3)
 - El worker resuelve embed→m3u8/mp4 (`/api/stream`) y el frontend reproduce en `<video>` con hls.js (sin anuncios del proveedor)
-- **Hosts FAST** (player propio): vimeos.net, vimeos.zip, goodstream.one, hlswish.com, uqload.* — `tryNextFastSource` recorre las fuentes FAST al fallar
-- **Fallback**: si ninguna fuente FAST funciona → iframe con toast. Cuevana/minochinos = SOLO iframe
+- **Hosts FAST** (player propio): vimeos.net, vimeos.zip, goodstream.one, hlswish.com, uqload.*, vidcache.net, mp4upload.com, doodstream, filemoon, mixdrop, voe… — lista en `STREAM_ALLOWED_HOSTS`
+- **Fallback**: si ninguna fuente FAST funciona → iframe con toast. El match de embeds usa rank (los `-1` van a iframe)
 - `/api/proxy`: passthrough con Range/UA/Referer/retries/CORS, allowlist `STREAM_ALLOWED_HOSTS` (403 fuera de lista, bloquea rangos privados)
 - ⚠️ Los embeds actuales de pelispedia son morencius/hglink/voe (no FAST) → hoy todo cae a iframe con anuncios. Pendiente: extractor morencius con token fresco o proveedor con hosts FAST.
 
@@ -101,34 +101,50 @@ MocchiStream/
 
 | Endpoint | Método | Qué hace |
 |---|---|---|
-| `/api/search?q=` | GET | Búsqueda en Pelispedia (caché `search/v5`, TTL 300s) |
-| `/api/mainpage?section=&page=` | GET | Portada/secciones (caché `home/v8`) |
-| `/api/details?url=` | GET | Detalle película/serie + episodios + download_links (fusión D1) |
-| `/api/links?url=` | GET | Servidores del embed (embeds paralelos `mapLimit` 4) |
+| `/api/search?q=` | GET | Búsqueda en TMDB (caché `search/v5`, TTL 300s) |
+| `/api/sections` | GET | Lista de secciones de portada |
+| `/api/mainpage?section=&page=` | GET | Portada/secciones (caché `home/v10`) |
+| `/api/details` | GET | Detalle película/serie + episodios + download_links (fusión D1) |
+| `/api/play?title=&type=&year=&season=&episode=&anime=&id=` | GET | Fuente de reproducción. **Primero Telegram** (si el item tiene link subido) → directo mp4 sin anuncios; si no, scrapers. Devuelve `{ok,type,url}` o `{ok:false,iframe}` |
+| `/api/tg-download?item_id=` | GET | Resuelve el link de Telegram a CDN directo |
 | `/api/stream?url=` | GET | Resuelve embed→m3u8/mp4 para el player propio (fast-fail IFRAME_ONLY, re-extrae hasta 4x) |
 | `/api/proxy?url=&ref=` | GET | Passthrough del stream (Range/UA/Referer/retries/CORS, allowlist) |
-| `/api/metadata` | GET/POST/DELETE | Categorías personalizadas |
-| `/api/metadata/bycategory?cat=` | GET | Items de una categoría |
-| `/api/categories` | GET | Lista de categorías con conteo |
-| `/api/avatar` | GET/POST/DELETE | Avatar del perfil (tabla `config`) |
-| `/api/admin/*` | GET/POST/DELETE | metadata, episodes, stats, cache/purge, category/rename (auth `X-Admin-Password`) |
+| `/api/playlists` · `/api/playlists/{id}` | GET | Playlists públicas |
+| `/api/auth/register` · `login` · `logout` · `me` | POST/GET | Sesiones con token (expira a 30 días). Rate-limit: login 10/15 min, registro 5/h por IP |
+| `/api/sync/{all,favorites,history,watch-later}` | GET/POST/DELETE | Sincronización de listas del usuario |
+| `/api/admin/*` | GET/POST/DELETE | avatar, download-links, stats, cache/purge, playlists (auth `X-Admin-Password` o `X-Bot-Secret`) |
 
 Todo el bloque de admin exige `X-Admin-Password` (variable `ADMIN_PASSWORD`). 401 verificado.
-Caché con `caches.default` — **SIEMPRE con CORS** en cachePut. Invalidación de cache al editar metadatos. `/api/details` y `/api/links` TTL 10 min; `/api/stream` TTL 5 min con re-verificación `#EXTM3U` al servir (auto-curación).
+Caché con `caches.default` — **SIEMPRE con CORS** en cachePut, y **borrar también la fila de `cache_keys`** al invalidar (si no, el purge reporta fallos). `/api/details` y `/api/links` TTL 10 min; `/api/stream` TTL 5 min con re-verificación al servir (auto-curación). Los fallos de `/api/play` se cachean 120 s para no re-scrapear en bucle.
 
 ### Proveedores
-| Proveedor | URL | Detalle |
+Prioridad de reproducción: **Telegram primero**, luego scrapers.
+
+| Proveedor | Uso | Detalle |
 |---|---|---|
-| Pelispedia (único) | `pelispedia.mov` (fallback `pelispedia.ink`) | Categoría inferida de la URL (`/anime/`→Anime, `/pelicula/`→Películas, resto→Series). Embeds vía `/vidurl/` (POW difficulty 3 + AES-CBC): hoy morencius/hglink/voe → iframe. Parser de tarjetas tolera `<h2>/<h3>/<h4>` |
+| Telegram (canal) | **Prioridad** | Si el item tiene link subido vía bot → mp4 directo sin anuncios |
+| Pelispedia | Pelis/series | Embeds vía `/vidurl/` (POW + AES-CBC) |
+| PelisPlusHD | Pelis/series | Scraper de búsqueda + embeds |
+| Monoschinos | Anime | Embeds `data-player` (base64). Temporadas como slugs aparte |
+| LaTAnime | Anime | Igual que Monoschinos; slugs con número de temporada |
+
+Match de anime: además del título en español se consulta `original_name` de TMDB (fix para casos como "Attack on Titan" vs "Shingeki no Kyojin").
+~~Cinecalidad~~ eliminado (todos sus dominios quedaron sin buscador funcional).
 
 ---
 
 ## D1 (mocchistream-db)
 
-- `movie_metadata` — categorías personalizadas (external_url, title, custom_category, poster…)
+- `movie_metadata` — metadatos personalizados (external_url, title, custom_category, poster…)
 - `episode_metadata` — PK `(series_url, season, episode)`: name, download_link, is_custom, updated_at
+- `download_links` — PK `(item_id, type, season, episode)`: links de Telegram subidos por el bot
 - `config` — key/value (avatar)
 - `cache_keys` — claves cacheadas para stats/purge
+- `users` · `sessions` (+`expires_at`, 30 días) — cuentas y sesiones
+- `user_favorites` · `user_history` (+`anime`) · `user_watch_later` — listas sincronizadas
+- `playlists` · `playlist_items` — playlists públicas
+- `rate_limits` — contador de intentos por IP/ventana (login/registro)
+- `tg_state` — estado conversacional del bot de Telegram
 
 ---
 

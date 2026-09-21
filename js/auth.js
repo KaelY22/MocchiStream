@@ -55,23 +55,6 @@ export async function authFetch(url, options = {}) {
   return res.json();
 }
 
-export async function checkSession() {
-  const token = getToken();
-  if (!token) return false;
-  try {
-    const data = await fetch(`${API_BASE}/auth/me`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).then(r => { if (!r.ok) throw 0; return r.json(); });
-    if (data.username) {
-      localStorage.setItem(USER_KEY, data.username);
-      localStorage.setItem(ADMIN_KEY, data.isAdmin ? '1' : '0');
-      return true;
-    }
-  } catch (e) {}
-  clearSession();
-  return false;
-}
-
 export function setupAuth() {
   const foot = document.querySelector('.sidebar-foot');
   if (!foot) return;

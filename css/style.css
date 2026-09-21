@@ -1340,6 +1340,7 @@ button { font-family: inherit; }
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
+.detail-badge.tg-badge { background: var(--success); color: #022c22; border-color: transparent; }
 .detail-desc {
   font-size: var(--text-base);
   line-height: 1.7;
@@ -1521,6 +1522,15 @@ button { font-family: inherit; }
 }
 .ep-dl:hover { background: rgba(var(--violet-rgb), 0.45); color: #fff; }
 .ep-dl svg { width: 0.95rem; height: 0.95rem; }
+.ep-tg {
+  flex-shrink: 0;
+  font-size: 0.58rem; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: #022c22;
+  background: var(--success);
+  padding: 0.18rem 0.5rem;
+  border-radius: var(--radius-full);
+}
 .ep-item.ep-custom { border-color: rgba(34, 211, 238, 0.45); background: rgba(34, 211, 238, 0.06); }
 .ep-item.ep-custom .ep-name::after {
   content: 'Solo descarga';

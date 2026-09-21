@@ -9,6 +9,7 @@ let currentPlaying = null;
 let currentNextResolver = null;
 let currentNext = null;
 let currentStream = null;
+let currentPlayBase = null;
 let downloading = false;
 let settingsHls = null;
 let currentAudioTrack = -1;
@@ -234,6 +235,8 @@ function playIframe(videoUrl, title) {
 
 export function playItem(item, ep, nextResolver) {
   const title = ep ? `${item.title} — Cap ${ep.episode}` : item.title;
+  const prev = getHistory().find(e => itemKey(e) === itemKey(item));
+  const resumeAt = (prev && prev.posAt && prev.durAt && prev.posAt > 10 && prev.posAt < prev.durAt * 0.93) ? prev.posAt : 0;
   addHistory({ id: item.id, type: item.type, title: item.title, poster: item.poster });
   currentPlaying = { id: item.id, type: item.type, title: item.title, poster: item.poster || null, url: itemKey(item), _ep: ep || null };
   currentNextResolver = nextResolver || null;
@@ -242,12 +245,13 @@ export function playItem(item, ep, nextResolver) {
   hideSettingsPanel();
   showLoading(true);
   showPlayer(title, item.type === 'tv' ? 'Serie' : 'Película');
-  const h = getHistory().find(e => itemKey(e) === itemKey(item));
-  const resumeAt = (h && h.posAt && h.durAt && h.posAt > 10 && h.posAt < h.durAt * 0.93) ? h.posAt : 0;
-  const params = new URLSearchParams({ title: item.title, type: item.type });
-  if (item.year) params.set('year', item.year);
-  if (ep) { params.set('season', ep.season); params.set('episode', ep.episode); }
-  if (item.anime) params.set('anime', '1');
+  const baseParams = new URLSearchParams({ title: item.title, type: item.type });
+  if (item.year) baseParams.set('year', item.year);
+  if (ep) { baseParams.set('season', ep.season); baseParams.set('episode', ep.episode); }
+  if (item.anime) baseParams.set('anime', '1');
+  currentPlayBase = baseParams;
+  const params = new URLSearchParams(baseParams);
+  if (item.id) params.set('id', item.id);
   fetch(`${API_BASE}/play?${params}`)
     .then(res => res.json())
     .then(data => {
@@ -268,7 +272,22 @@ export function playItem(item, ep, nextResolver) {
     });
 }
 
-function playOwnPlayer(stream, title, resumeAt) {
+let hlsPromise = null;
+function ensureHls() {
+  if (window.Hls) return Promise.resolve(window.Hls);
+  if (!hlsPromise) {
+    hlsPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'js/hls.min.js';
+      s.onload = () => resolve(window.Hls);
+      s.onerror = () => { hlsPromise = null; reject(new Error('HLS load failed')); };
+      document.head.appendChild(s);
+    });
+  }
+  return hlsPromise;
+}
+
+async function playOwnPlayer(stream, title, resumeAt) {
   const video = document.getElementById('playerVideoBox');
   document.getElementById('playerStage').classList.remove('hidden');
   document.getElementById('playerIframeBox').classList.add('hidden');
@@ -282,6 +301,26 @@ function playOwnPlayer(stream, title, resumeAt) {
       destroyOwnPlayer();
       showToast(`La fuente falló (${reason}). Prueba con otro título o más tarde.`, true);
       closeFullPlayer();
+    } else if (stream.direct && currentPlayBase) {
+      stream.retried = true;
+      destroyOwnPlayer();
+      showToast('La fuente de Telegram falló, buscando otra...', false);
+      fetch(`${API_BASE}/play?${currentPlayBase}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.ok && data.url) {
+            playOwnPlayer(data, title, resumeAt);
+          } else if (data && data.iframe) {
+            playIframe(data.iframe, title);
+          } else {
+            showToast('No se encontró otra fuente para este título.', true);
+            closeFullPlayer();
+          }
+        })
+        .catch(() => {
+          showToast('Error al buscar otra fuente.', true);
+          closeFullPlayer();
+        });
     } else {
       stream.retried = true;
       destroyOwnPlayer();
@@ -305,9 +344,19 @@ function playOwnPlayer(stream, title, resumeAt) {
     }
   };
 
-  if (stream.type === 'hls' && window.Hls && Hls.isSupported()) {
+  const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
+  let HlsLib = window.Hls;
+  if (stream.type === 'hls' && !nativeHls) {
+    try {
+      HlsLib = await ensureHls();
+    } catch (e) {
+      HlsLib = null;
+    }
+  }
+
+  if (stream.type === 'hls' && HlsLib && HlsLib.isSupported()) {
     if (hlsInstance) hlsInstance.destroy();
-    hlsInstance = new Hls({
+    hlsInstance = new HlsLib({
       xhrSetup: (xhr, url) => xhr.open('GET', proxyUrl(url, stream.referer), true),
       fetchSetup: (ctx, init) => new Request(proxyUrl(ctx.url, stream.referer), init),
       manifestLoadingTimeOut: 10000,
@@ -320,7 +369,7 @@ function playOwnPlayer(stream, title, resumeAt) {
       maxBufferLength: 10,
       maxBufferSize: 20 * 1000 * 1000,
     });
-    hlsInstance.on(Hls.Events.ERROR, (_evt, data) => {
+    hlsInstance.on(HlsLib.Events.ERROR, (_evt, data) => {
       if (data.fatal) {
         const msg = data.err && data.err.message ? data.err.message.slice(0, 90) : '';
         const reason = `${data.details || data.type || ''}${msg ? ' | ' + msg : ''}`;
@@ -331,7 +380,7 @@ function playOwnPlayer(stream, title, resumeAt) {
     });
     hlsInstance.loadSource(stream.url);
     hlsInstance.attachMedia(video);
-    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+    hlsInstance.on(HlsLib.Events.MANIFEST_PARSED, () => {
       settingsHls = hlsInstance;
       populateSettings();
       applySavedSettings();
@@ -342,7 +391,7 @@ function playOwnPlayer(stream, title, resumeAt) {
       video.play().catch(() => showOverlay());
     });
   } else if (stream.type === 'mp4' || (stream.type === 'hls' && video.canPlayType('application/vnd.apple.mpegurl'))) {
-    video.src = proxyUrl(stream.url, stream.referer);
+    video.src = stream.direct ? stream.url : proxyUrl(stream.url, stream.referer);
     if (resumeAt > 0) {
       video.addEventListener('loadedmetadata', () => {
         video.currentTime = resumeAt;
@@ -497,7 +546,8 @@ export function closeFullPlayer() {
   const iframe = document.getElementById('playerIframe');
   if (iframe) iframe.src = '';
   document.body.style.overflow = 'auto';
-  history.back();
+  if (history.length > 1) history.back();
+  else location.href = 'index.html';
 }
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];

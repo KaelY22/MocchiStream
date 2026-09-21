@@ -4,6 +4,24 @@ import { isFav, toggleFav, isInWatchLater, toggleWatchLater, setDetailFavUpdater
 let currentDetail = null;
 let detailSeason = 1;
 
+async function openDl(dl) {
+  if (!dl || !dl.url) {
+    showToast('No hay descarga disponible ahora, pero si la pides la habrá');
+    return;
+  }
+  if (/^https?:\/\/t\.me\//i.test(dl.url)) {
+    try {
+      const res = await fetch(`${API_BASE}/tg-download?url=${encodeURIComponent(dl.url)}`);
+      const data = await res.json();
+      if (data && data.ok && data.url) {
+        window.open(data.url, '_blank', 'noopener');
+        return;
+      }
+    } catch (e) {}
+  }
+  window.open(dl.url, '_blank', 'noopener');
+}
+
 export function fetchItem(id, type) {
   return fetch(`${API_BASE}/details?id=${encodeURIComponent(id)}&type=${encodeURIComponent(type || 'movie')}`)
     .then(res => res.json())
@@ -48,14 +66,6 @@ export function initDetail() {
   });
 }
 
-export function openDetailFromId(id, type) {
-  fetchItem(id, type)
-    .then(item => openDetail(item))
-    .catch(() => {
-      showToast('No se pudo cargar el título.', true);
-    });
-}
-
 export function openDetail(item, season) {
   currentDetail = item;
   const seasons = [...new Set((item.episodes || []).map(e => e.season).filter(n => n !== null && n !== undefined))].sort((a, b) => a - b);
@@ -68,7 +78,9 @@ export function openDetail(item, season) {
   const badges = [item.anime ? 'Anime' : (item.type === 'tv' ? 'Serie' : 'Película')];
   if (item.year) badges.push(String(item.year));
   if (item.score) badges.push(`★ ${item.score}`);
-  document.getElementById('detailBadges').innerHTML = badges.map(b => `<span class="detail-badge">${esc(b)}</span>`).join('');
+  const hasTg = (item.downloads || []).some(d => /^https?:\/\/t\.me\//i.test(d.url));
+  document.getElementById('detailBadges').innerHTML = badges.map(b => `<span class="detail-badge">${esc(b)}</span>`).join('')
+    + (hasTg ? '<span class="detail-badge tg-badge">Sin anuncios</span>' : '');
   document.getElementById('detailDesc').textContent = item.overview || '';
   const playBtn = document.getElementById('detailPlayBtn');
   playBtn.onclick = () => {
@@ -85,10 +97,7 @@ export function openDetail(item, season) {
   if (item.in_playlist) {
     dlBtn.classList.remove('hidden');
     const dl = (item.downloads || []).find(x => !x.season && !x.episode) || (item.downloads || [])[0];
-    dlBtn.onclick = () => {
-      if (dl && dl.url) window.open(dl.url, '_blank', 'noopener');
-      else showToast('No hay descarga disponible ahora, pero si la pides la habrá');
-    };
+    dlBtn.onclick = () => openDl(dl);
   } else {
     dlBtn.classList.add('hidden');
   }
@@ -116,7 +125,7 @@ export function openDetail(item, season) {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const dl = (item.downloads || []).find(x => x.season === parseInt(btn.dataset.season) && x.episode === parseInt(btn.dataset.episode));
-        if (dl && dl.url) window.open(dl.url, '_blank', 'noopener');
+        if (dl) openDl(dl);
         else showToast('No hay descarga disponible ahora, pero si la pides la habrá');
       });
     });
@@ -139,10 +148,12 @@ function renderEps(eps, item) {
     const dlBtn = item.in_playlist
       ? `<button class="ep-dl" data-season="${e.season}" data-episode="${e.episode}" aria-label="Descargar capítulo"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0 4-4m-4 4-4-4"/></svg></button>`
       : '';
+    const tgDl = (item.downloads || []).some(x => x.season === e.season && x.episode === e.episode && /^https?:\/\/t\.me\//i.test(x.url));
     return `
       <div class="ep-item" data-season="${e.season}" data-episode="${e.episode}">
         ${thumb ? `<img class="ep-thumb" src="${thumb}" alt="" loading="lazy" onerror="this.style.display='none'" />` : `<span class="ep-num">${numLabel}</span>`}
         <span class="ep-name">${esc(e.name)}</span>
+        ${tgDl ? '<span class="ep-tg">Sin anuncios</span>' : ''}
         ${dlBtn}
         ${thumb ? `<span class="ep-num">${numLabel}</span>` : ''}
       </div>`;

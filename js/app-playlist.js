@@ -1,16 +1,10 @@
-import { API_BASE, esc, safeImg, resetStorageIfStale, showToast } from './utils.js';
+import { API_BASE, esc, safeImg, showToast } from './utils.js';
 import { cardHtml, loadLists } from './catalog.js';
-import { applyTheme, setupTheme, setupMenu, setupSearch, setupInstall, registerSW } from './header.js';
+import { initPage } from './header.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (resetStorageIfStale()) showToast('Datos locales renovados');
-  applyTheme();
+  initPage();
   loadLists();
-  setupTheme();
-  setupMenu();
-  setupSearch();
-  setupInstall();
-  registerSW();
   loadPlaylists();
   document.addEventListener('click', e => {
     const card = e.target.closest('.video-card');
